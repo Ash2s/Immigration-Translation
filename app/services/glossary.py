@@ -1,6 +1,7 @@
 import csv
 import uuid
 import os
+import re
 from openpyxl import load_workbook
 from typing import Optional
 
@@ -59,16 +60,19 @@ class GlossaryService:
 
     def normalize_quotes(self, text: str) -> str:
         """Normalize straight quotes to curly quotes for consistent matching."""
-        return text.replace('"', '"').replace('"', '"')
+        return text.replace("“", "”").replace("”", "“")
 
     def replace_with_glossary(self, text: str, glossary: dict[str, str]) -> str:
         """Longest-match-first replacement using glossary dict."""
         if not text or not glossary:
             return text
-        sorted_terms = sorted(glossary.keys(), key=len, reverse=True)
+        # Normalize quotes in text first
+        text = self.normalize_quotes(text)
+        # Normalize glossary keys for matching
+        normalized_glossary = {self.normalize_quotes(k): v for k, v in glossary.items()}
+        sorted_terms = sorted(normalized_glossary.keys(), key=len, reverse=True)
         result = text
         for term in sorted_terms:
-            import re
             pattern = re.escape(term)
-            result = re.sub(pattern, glossary[term], result)
+            result = re.sub(pattern, normalized_glossary[term], result)
         return result

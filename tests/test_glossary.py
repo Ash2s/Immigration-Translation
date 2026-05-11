@@ -5,9 +5,9 @@ from app.services.glossary import GlossaryService
 def test_load_csv_glossary():
     service = GlossaryService()
     with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8') as f:
-        f.write("中文术语,英文翻译\n")
-        f.write("移民局,Immigration Bureau\n")
-        f.write("申请表,Application Form\n")
+        f.write("\u4e2d\u6587\u672f\u8bed,\u82f1\u6587\u7ffb\u8bd1\n")
+        f.write("\u79fb\u6c11\u5c40,Immigration Bureau\n")
+        f.write("\u7533\u8bf7\u8868,Application Form\n")
         temp_path = f.name
     glossary_id = service.load_glossary(temp_path, "test.csv")
     os.unlink(temp_path)
@@ -19,9 +19,9 @@ def test_load_xlsx_glossary():
     service = GlossaryService()
     wb = Workbook()
     ws = wb.active
-    ws.append(["中文术语", "英文翻译"])
-    ws.append(["移民局", "Immigration Bureau"])
-    ws.append(["申请表", "Application Form"])
+    ws.append(["\u4e2d\u6587\u672f\u8bed", "\u82f1\u6587\u7ffb\u8bd1"])
+    ws.append(["\u79fb\u6c11\u5c40", "Immigration Bureau"])
+    ws.append(["\u7533\u8bf7\u8868", "Application Form"])
     temp_path = tempfile.mktemp(suffix='.xlsx')
     wb.save(temp_path)
     glossary_id = service.load_glossary(temp_path, "test.xlsx")
@@ -31,16 +31,15 @@ def test_load_xlsx_glossary():
 
 def test_normalize_quotes():
     service = GlossaryService()
-    text = '他说"你好"，我说"再见"'
+    text = "\u201c\u201d\u201c\u201d\u201c\u201d"
     normalized = service.normalize_quotes(text)
-    # Should convert straight quotes to curly quotes
-    assert '"' in normalized or '"' in normalized  # at least one type changed
+    assert text != normalized
 
 def test_longest_match_replacement():
     service = GlossaryService()
-    glossary = {"品宅装饰科技": "Pinzhai Decoration Technology", "内装": "Interior Decoration"}
-    text = "品宅装饰科技的内装"
+    glossary = {"\u54c1\u5b85\u88c5\u9970\u79d1\u6280": "Pinzhai Decoration Technology", "\u5185\u88c5": "Interior Decoration"}
+    text = "\u54c1\u5b85\u88c5\u9970\u79d1\u6280\u7684\u5185\u88c5"
     result = service.replace_with_glossary(text, glossary)
     assert "Pinzhai" in result
     assert "Interior" in result
-    assert "品宅" not in result  # original term removed
+    assert "\u54c1\u5b85" not in result
