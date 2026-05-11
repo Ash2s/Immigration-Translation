@@ -1,0 +1,74 @@
+import csv
+import uuid
+import os
+from openpyxl import load_workbook
+from typing import Optional
+
+class GlossaryService:
+    def __init__(self):
+        self._glossaries: dict[str, dict[str, str]] = {}
+        self._metadata: dict[str, dict] = {}
+
+    def load_glossary(self, file_path: str, filename: str) -> str:
+        glossary_id = str(uuid.uuid4())
+        terms = {}
+        ext = os.path.splitext(filename)[-1].lower()
+        if ext == '.csv':
+            terms = self._load_csv(file_path)
+        elif ext in ['.xlsx', '.xls']:
+            terms = self._load_xlsx(file_path)
+        else:
+            raise ValueError(f"Unsupported glossary format: {ext}")
+        self._glossaries[glossary_id] = terms
+        self._metadata[glossary_id] = {
+            "filename": filename,
+            "term_count": len(terms)
+        }
+        return glossary_id
+
+    def _load_csv(self, path: str) -> dict[str, str]:
+        terms = {}
+        with open(path, 'r', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            for row in reader:
+                if len(row) >= 2:
+                    cn, en = row[0].strip(), row[1].strip()
+                    if cn and en and cn != '中文术语':
+                        terms[cn] = en
+        return terms
+
+    def _load_xlsx(self, path: str) -> dict[str, str]:
+        terms = {}
+        wb = load_workbook(path, data_only=True)
+        ws = wb.active
+        for row in ws.iter_rows(values_only=True):
+            if len(row) >= 2:
+                cn, en = str(row[0]).strip(), str(row[1]).strip()
+                if cn and en and cn != '中文术语':
+                    terms[cn] = en
+        return terms
+
+    def get_glossary(self, glossary_id: str) -> dict[str, str]:
+        return self._glossaries.get(glossary_id, {})
+
+    def get_term_count(self, glossary_id: str) -> int:
+        return len(self._glossaries.get(glossary_id, {}))
+
+    def get_metadata(self, glossary_id: str) -> Optional[dict]:
+        return self._metadata.get(glossary_id)
+
+    def normalize_quotes(self, text: str) -> str:
+        """Normalize straight quotes to curly quotes for consistent matching."""
+        return text.replace('"', '"').replace('"', '"')
+
+    def replace_with_glossary(self, text: str, glossary: dict[str, str]) -> str:
+        """Longest-match-first replacement using glossary dict."""
+        if not text or not glossary:
+            return text
+        sorted_terms = sorted(glossary.keys(), key=len, reverse=True)
+        result = text
+        for term in sorted_terms:
+            import re
+            pattern = re.escape(term)
+            result = re.sub(pattern, glossary[term], result)
+        return result
