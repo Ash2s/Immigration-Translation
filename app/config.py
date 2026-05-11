@@ -8,5 +8,6 @@ class Settings:
     DEEPSEEK_MODEL: str = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
     GLOSSARY_DIR: str = os.getenv("GLOSSARY_DIR", "/tmp/glossaries")
     UPLOAD_DIR: str = os.getenv("UPLOAD_DIR", "/tmp/uploads")
+    JOBS_DIR: str = os.getenv("JOBS_DIR", "/tmp/jobs")
 
 settings = Settings()

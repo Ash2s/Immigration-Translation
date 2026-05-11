@@ -1,6 +1,7 @@
 """API routes for immigration document translation service."""
 
 import os
+import json
 import uuid
 import asyncio
 import re
@@ -28,16 +29,66 @@ translator_service = TranslatorService()
 doc_parser = DocumentParser()
 
 # ---------------------------------------------------------------------------
-# In-memory job tracking
+# Storage directories
 # ---------------------------------------------------------------------------
+UPLOAD_DIR = settings.UPLOAD_DIR
+JOBS_DIR = settings.JOBS_DIR
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(JOBS_DIR, exist_ok=True)
+
+# ---------------------------------------------------------------------------
+# File-backed job tracking
+# ---------------------------------------------------------------------------
+# Every mutation to jobs or original_filenames is written to disk so state
+# survives a process restart as long as the filesystem remains intact.
 jobs: dict[str, dict] = {}
 original_filenames: dict[str, str] = {}
 
-# ---------------------------------------------------------------------------
-# File / glossary storage directory
-# ---------------------------------------------------------------------------
-UPLOAD_DIR = settings.UPLOAD_DIR
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+def _load_all_jobs() -> None:
+    """Populate *jobs* and *original_filenames* from disk on startup."""
+    fnames_path = os.path.join(JOBS_DIR, "_filenames.json")
+    if os.path.exists(fnames_path):
+        try:
+            with open(fnames_path, "r", encoding="utf-8") as f:
+                original_filenames.update(json.load(f))
+        except Exception:
+            pass
+
+    for name in os.listdir(JOBS_DIR):
+        if not name.endswith(".json") or name == "_filenames.json":
+            continue
+        job_id = name[:-5]  # strip ".json"
+        try:
+            with open(os.path.join(JOBS_DIR, name), "r", encoding="utf-8") as f:
+                jobs[job_id] = json.load(f)
+        except Exception:
+            pass
+
+
+def _save_job(job_id: str, data: dict) -> None:
+    """Write a single job to disk."""
+    path = os.path.join(JOBS_DIR, f"{job_id}.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, default=str)
+
+
+def _delete_job(job_id: str) -> None:
+    """Remove a job file from disk."""
+    path = os.path.join(JOBS_DIR, f"{job_id}.json")
+    if os.path.exists(path):
+        os.remove(path)
+
+
+def _save_filenames() -> None:
+    """Persist the original_filenames mapping to disk."""
+    path = os.path.join(JOBS_DIR, "_filenames.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(original_filenames, f, ensure_ascii=False, default=str)
+
+
+# Load existing jobs on startup
+_load_all_jobs()
 
 # Regex for Chinese punctuation detection (used for term-only heuristic)
 _CN_PUNCT_RE = re.compile(
@@ -119,6 +170,7 @@ async def upload_files(files: list[UploadFile] = File(...)):
         original_filenames[file_id] = os.path.splitext(f.filename)[0]
         file_ids.append(file_id)
 
+    _save_filenames()
     return {"file_ids": file_ids}
 
 
@@ -135,6 +187,7 @@ async def translate(req: TranslateRequest):
         "file_ids": req.file_ids,
         "glossary_id": req.glossary_id,
     }
+    _save_job(job_id, jobs[job_id])
     asyncio.create_task(run_translation(job_id, req.file_ids, req.glossary_id))
     return JobResponse(job_id=job_id, status="processing")
 
@@ -245,6 +298,8 @@ async def revise(req: RevisionRequest):
         "file_ids": file_ids,
         "glossary_id": glossary_id,
     }
+
+    _save_job(new_job_id, jobs[new_job_id])
 
     asyncio.create_task(
         run_translation_with_feedback(new_job_id, file_ids, glossary_id, req.feedback)
@@ -490,6 +545,7 @@ async def run_translation(
     except ValueError as e:
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["error"] = str(e)
+        _save_job(job_id, jobs[job_id])
         return
 
     results = []
@@ -499,6 +555,7 @@ async def run_translation(
 
     jobs[job_id]["status"] = "completed"
     jobs[job_id]["results"] = results
+    _save_job(job_id, jobs[job_id])
 
 
 async def run_translation_with_feedback(
@@ -510,6 +567,7 @@ async def run_translation_with_feedback(
     except ValueError as e:
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["error"] = str(e)
+        _save_job(job_id, jobs[job_id])
         return
 
     results = []
@@ -519,3 +577,4 @@ async def run_translation_with_feedback(
 
     jobs[job_id]["status"] = "completed"
     jobs[job_id]["results"] = results
+    _save_job(job_id, jobs[job_id])
