@@ -31,9 +31,13 @@ def test_load_xlsx_glossary():
 
 def test_normalize_quotes():
     service = GlossaryService()
-    text = "\u201c\u201d\u201c\u201d\u201c\u201d"
-    normalized = service.normalize_quotes(text)
-    assert text != normalized
+    # Straight quotes should be normalized to curly quotes (idempotent)
+    text_straight = '"hello"'
+    normalized = service.normalize_quotes(text_straight)
+    assert normalized == '\u201chello\u201d'
+    # Already-curly quotes should remain unchanged (idempotent)
+    text_curly = '\u201chello\u201d'
+    assert service.normalize_quotes(text_curly) == text_curly
 
 def test_longest_match_replacement():
     service = GlossaryService()
