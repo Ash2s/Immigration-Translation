@@ -31,6 +31,7 @@ doc_parser = DocumentParser()
 # In-memory job tracking
 # ---------------------------------------------------------------------------
 jobs: dict[str, dict] = {}
+original_filenames: dict[str, str] = {}
 
 # ---------------------------------------------------------------------------
 # File / glossary storage directory
@@ -115,6 +116,7 @@ async def upload_files(files: list[UploadFile] = File(...)):
         content = await f.read()
         with open(dest, "wb") as out:
             out.write(content)
+        original_filenames[file_id] = os.path.splitext(f.filename)[0]
         file_ids.append(file_id)
 
     return {"file_ids": file_ids}
@@ -151,8 +153,12 @@ async def get_status(job_id: str):
 
 
 @router.get("/result/{job_id}")
-async def get_result(job_id: str):
-    """Download the first successfully translated .docx file for a job."""
+async def get_result(job_id: str, file_id: str | None = None):
+    """Download a translated .docx file for a job.
+
+    If *file_id* is provided, only that file is downloaded.
+    Otherwise the first completed result is returned.
+    """
     job = jobs.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -163,20 +169,59 @@ async def get_result(job_id: str):
     if not results:
         raise HTTPException(status_code=404, detail="No results found")
 
+    if file_id:
+        results = [r for r in results if r["file_id"] == file_id]
+
     for entry in results:
         if entry.get("status") == "completed":
             file_path = os.path.join(UPLOAD_DIR, f"{entry['file_id']}_EN.docx")
             if os.path.exists(file_path):
+                base_name = original_filenames.get(
+                    entry["file_id"], entry["file_id"]
+                )
                 return FileResponse(
                     file_path,
                     media_type=(
                         "application/vnd.openxmlformats-officedocument"
                         ".wordprocessingml.document"
                     ),
-                    filename=f"{entry['file_id']}_EN.docx",
+                    filename=f"{base_name}-EN.docx",
                 )
 
     raise HTTPException(status_code=404, detail="No completed result files found")
+
+
+@router.get("/preview/{job_id}")
+async def preview_result(job_id: str, file_id: str | None = None):
+    """Return the translated text content for preview."""
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job["status"] != "completed":
+        raise HTTPException(status_code=400, detail="Job not yet completed")
+
+    results = job.get("results", [])
+    previews = []
+    for entry in results:
+        if entry.get("status") == "completed":
+            file_path = os.path.join(UPLOAD_DIR, f"{entry['file_id']}_EN.docx")
+            if os.path.exists(file_path):
+                doc = doc_parser.read_document(file_path)
+                paragraphs = doc_parser.extract_paragraphs(doc)
+                previews.append({
+                    "file_id": entry["file_id"],
+                    "text": "\n\n".join(p["text"] for p in paragraphs),
+                })
+            else:
+                previews.append({
+                    "file_id": entry["file_id"],
+                    "text": "[File not found]",
+                })
+
+    if file_id:
+        previews = [p for p in previews if p["file_id"] == file_id]
+
+    return {"job_id": job_id, "previews": previews}
 
 
 @router.post("/revise", response_model=JobResponse)
@@ -252,8 +297,10 @@ async def _translate_paragraphs(
             if feedback:
                 prompt_text = (
                     f"{text}\n\n"
-                    f"[Revision feedback: {feedback}]\n"
-                    f"Please apply this feedback when translating."
+                    f"[REVISION_INSTRUCTION]\n"
+                    f"{feedback}\n"
+                    f"[/REVISION_INSTRUCTION]\n"
+                    f"Apply the above revision instruction when translating."
                 )
             translated = translator_service.translate_text(prompt_text, glossary)
 
@@ -264,7 +311,9 @@ async def _translate_paragraphs(
                 if feedback:
                     retry_prompt = (
                         f"{text}\n\n"
-                        f"[Revision feedback: {feedback}]"
+                        f"[REVISION_INSTRUCTION]\n"
+                        f"{feedback}\n"
+                        f"[/REVISION_INSTRUCTION]"
                     )
                 translated = translator_service.translate_text(
                     "Please fully translate the following Chinese to English "
@@ -275,6 +324,26 @@ async def _translate_paragraphs(
 
         # Fix any remaining Chinese formatting labels
         translated = TranslatorService.fix_cn_labels(translated)
+
+        # Strip any revision instruction residue the model preserved
+        translated = re.sub(
+            r'\s*\[/?REVISION_INSTRUCTION\].*?\[/REVISION_INSTRUCTION\]\s*',
+            '',
+            translated,
+            flags=re.DOTALL,
+        ).strip()
+        translated = re.sub(
+            r'\s*\[/?REVISION_INSTRUCTION\].*',
+            '',
+            translated,
+            flags=re.DOTALL,
+        ).strip()
+
+        # Strip markdown bold/italic markers (**text**) that the model
+        # sometimes adds — formatting is applied via run-level properties.
+        translated = re.sub(r'\*\*\*(.+?)\*\*\*', r'\1', translated, flags=re.DOTALL)
+        translated = re.sub(r'\*\*(.+?)\*\*', r'\1', translated, flags=re.DOTALL)
+        translated = re.sub(r'\*(.+?)\*', r'\1', translated, flags=re.DOTALL)
 
         result.append({**para_data, "translated_text": translated})
 
@@ -291,28 +360,123 @@ async def _process_file(
     Returns a result dict with status ``"completed"`` or ``"failed"``.
     """
     file_path = os.path.join(UPLOAD_DIR, f"{file_id}.docx")
+    translated_path = os.path.join(UPLOAD_DIR, f"{file_id}_EN.docx")
     if not os.path.exists(file_path):
         return {"file_id": file_id, "status": "failed", "error": "Source file not found"}
 
     try:
-        doc = doc_parser.read_document(file_path)
-        paragraphs = doc_parser.extract_paragraphs(doc)
-        translated = await _translate_paragraphs(paragraphs, glossary, feedback)
+        # --- Model-based formatting interpretation ---
+        fmt_actions: list[dict] = []
+        needs_retranslation = True
 
-        # Apply formatting to each paragraph (by index to avoid text-matching issues)
-        for idx, entry in enumerate(translated):
-            if idx < len(doc.paragraphs):
-                doc_parser.apply_formatting(
-                    doc.paragraphs[idx],
-                    entry["runs"],
-                    entry["translated_text"],
+        if feedback:
+            src_doc = doc_parser.read_document(file_path)
+            body_paras = doc_parser.extract_paragraphs(src_doc)
+            all_texts = [p["text"] for p in body_paras]
+            table_cells = doc_parser.extract_table_cells(src_doc)
+            all_texts.extend(c["text"] for c in table_cells)
+
+            fmt_result = translator_service.interpret_formatting_feedback(
+                feedback, all_texts
+            )
+            fmt_actions = fmt_result.get("actions", [])
+            needs_retranslation = fmt_result.get("needs_retranslation", True)
+
+        # --- Decide source: translate from Chinese or reuse translated doc ---
+        if needs_retranslation:
+            doc = doc_parser.read_document(file_path)
+            paragraphs = doc_parser.extract_paragraphs(doc)
+            translated = await _translate_paragraphs(paragraphs, glossary, feedback)
+
+            for idx, entry in enumerate(translated):
+                if idx < len(doc.paragraphs):
+                    doc_parser.apply_formatting(
+                        doc.paragraphs[idx],
+                        entry["runs"],
+                        entry["translated_text"],
+                    )
+                    doc_parser.set_line_spacing(doc.paragraphs[idx], True)
+
+            # Translate table cells
+            table_cells = doc_parser.extract_table_cells(doc)
+            if table_cells:
+                translated_cells = await _translate_paragraphs(
+                    table_cells, glossary, feedback
                 )
+                for entry in translated_cells:
+                    doc_parser.apply_formatting(
+                        entry["paragraph"],
+                        entry["runs"],
+                        entry["translated_text"],
+                    )
+                    doc_parser.set_line_spacing(entry["paragraph"], False)
 
-        doc_parser.clear_background_shading(doc)
-        output_path = os.path.join(UPLOAD_DIR, f"{file_id}_EN.docx")
+            # Translate text boxes
+            textbox_paras = doc_parser.extract_textbox_paragraphs(doc)
+            if textbox_paras:
+                translated_tb = await _translate_paragraphs(
+                    textbox_paras, glossary, feedback
+                )
+                for entry in translated_tb:
+                    doc_parser.apply_textbox_formatting(
+                        entry["element"],
+                        entry["runs"],
+                        entry["translated_text"],
+                    )
+                    doc_parser.set_textbox_line_spacing(entry["element"])
+
+            doc_parser.clear_background_shading(doc)
+
+        elif os.path.exists(translated_path):
+            # Formatting-only revision: read already-translated doc
+            doc = doc_parser.read_document(translated_path)
+
+        else:
+            # First translation: no translated doc yet, translate now
+            doc = doc_parser.read_document(file_path)
+            paragraphs = doc_parser.extract_paragraphs(doc)
+            translated = await _translate_paragraphs(paragraphs, glossary, feedback)
+
+            for idx, entry in enumerate(translated):
+                if idx < len(doc.paragraphs):
+                    doc_parser.apply_formatting(doc.paragraphs[idx], entry["runs"], entry["translated_text"])
+                    doc_parser.set_line_spacing(doc.paragraphs[idx], True)
+
+            table_cells = doc_parser.extract_table_cells(doc)
+            if table_cells:
+                translated_cells = await _translate_paragraphs(table_cells, glossary, feedback)
+                for entry in translated_cells:
+                    doc_parser.apply_formatting(entry["paragraph"], entry["runs"], entry["translated_text"])
+                    doc_parser.set_line_spacing(entry["paragraph"], False)
+
+            textbox_paras = doc_parser.extract_textbox_paragraphs(doc)
+            if textbox_paras:
+                translated_tb = await _translate_paragraphs(textbox_paras, glossary, feedback)
+                for entry in translated_tb:
+                    doc_parser.apply_textbox_formatting(entry["element"], entry["runs"], entry["translated_text"])
+                    doc_parser.set_textbox_line_spacing(entry["element"])
+
+            doc_parser.clear_background_shading(doc)
+
+        # --- Apply targeted formatting ---
+        applied: list[str] = []
+        if fmt_actions:
+            applied = doc_parser.apply_targeted_formatting(doc, fmt_actions)
+        elif feedback:
+            applied = doc_parser.apply_formatting_instructions(doc, feedback)
+
+        output_path = translated_path
         doc_parser.save_document(doc, output_path)
 
-        return {"file_id": file_id, "status": "completed"}
+        # Post-translation quality check
+        cn_warnings = doc_parser.verify_no_cn(output_path)
+
+        result = {"file_id": file_id, "status": "completed"}
+        if cn_warnings:
+            result["cn_warnings"] = cn_warnings
+        if applied:
+            result["formatting_applied"] = applied
+        return result
     except Exception as e:
         return {"file_id": file_id, "status": "failed", "error": str(e)}
 

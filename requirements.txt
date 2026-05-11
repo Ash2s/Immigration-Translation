@@ -5,3 +5,4 @@ openai==1.54.*
 python-multipart==0.0.20
 pydantic==2.*
 python-dotenv==1.0.*
+openpyxl==3.1.*

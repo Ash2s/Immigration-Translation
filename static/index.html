@@ -4,277 +4,812 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Immigration Translation Tool</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,700;0,900;1,500;1,700&family=Source+Serif+4:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&display=swap" rel="stylesheet">
 <style>
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body {
-  background: #f0f0ec;
-  font-family: 'Times New Roman', serif;
-  color: #3a3a2e;
-  min-height: 100vh;
-  padding: 32px;
+:root {
+  --bg: #f2f0eb;
+  --surface: #fdfcf9;
+  --surface-hover: #faf8f4;
+  --gold: #9a8664;
+  --gold-light: #c4b698;
+  --gold-dark: #7a6a4e;
+  --gold-glow: rgba(154, 134, 100, 0.3);
+  --border: #d6d2c8;
+  --border-light: #e5e2d8;
+  --text-primary: #2c2c24;
+  --text-secondary: #6b685e;
+  --text-tertiary: #918e82;
+  --text-on-gold: #fcfaf6;
+  --error-bg: #f0e8e6;
+  --error-text: #8a4a3e;
+  --success-bg: #e8ede2;
+  --success-text: #4a6a3a;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --transition: 0.4s cubic-bezier(0.22, 1, 0.36, 1);
 }
-.container { max-width: 800px; margin: 0 auto; }
 
-/* Glossary Bar */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  font-family: 'Source Serif 4', 'Georgia', serif;
+  font-variant-numeric: lining-nums tabular-nums;
+  color: var(--text-primary);
+  min-height: 100vh;
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* Noise texture */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  opacity: 0.3;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 256px 256px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Warm vignette */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(ellipse at 50% 0%, transparent 30%, rgba(44,44,36,0.04) 100%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.container {
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 48px 24px 72px;
+  position: relative;
+  z-index: 1;
+}
+
+/* ========== HEADER ========== */
+.app-header {
+  text-align: center;
+  margin-bottom: 44px;
+  animation: fadeSlideDown 0.7s ease both;
+}
+.app-header .title-en {
+  font-family: 'Playfair Display', serif;
+  font-weight: 900;
+  font-size: 42px;
+  letter-spacing: 1.2px;
+  color: var(--text-primary);
+  line-height: 1.1;
+  font-style: italic;
+}
+.app-header .title-en .gold {
+  color: var(--gold);
+  font-weight: 700;
+  font-style: normal;
+}
+.app-header .title-cn {
+  font-family: 'Source Serif 4', 'Georgia', serif;
+  font-size: 16px;
+  color: var(--text-tertiary);
+  letter-spacing: 6px;
+  margin-top: 8px;
+  font-weight: 400;
+  text-transform: uppercase;
+}
+.app-header .divider-line {
+  width: 60px;
+  height: 1px;
+  background: var(--gold-light);
+  margin: 14px auto 0;
+}
+
+/* ========== CARD ========== */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 2px 12px rgba(44,44,36,0.05);
+  transition: box-shadow var(--transition);
+}
+
+/* ========== GLOSSARY BAR ========== */
 .glossary-bar {
-  background: #fff;
-  border: 1px solid #d0d0c8;
-  border-radius: 6px;
-  padding: 14px 20px;
-  margin-bottom: 16px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+  padding: 14px 22px;
+  margin-bottom: 16px;
+  animation: fadeSlideUp 0.5s ease both 0.1s;
+}
+.glossary-bar .label-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 .glossary-bar .label {
-  color: #5a4a3a;
-  font-size: 11px;
+  font-family: 'Source Serif 4', serif;
+  font-weight: 600;
+  font-size: 13px;
   text-transform: uppercase;
-  letter-spacing: 1px;
-  font-weight: bold;
-}
-.glossary-bar .status { color: #6a6a5a; font-size: 12px; margin-left: 12px; }
-.glossary-bar .name { color: #4a4a3a; font-size: 12px; font-weight: 500; }
-.glossary-bar .actions { display: flex; gap: 10px; align-items: center; }
-.btn-outline {
-  background: none;
-  border: 1px solid #b8b8aa;
-  color: #6a5a4a;
-  padding: 6px 14px;
-  font-size: 11px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-family: 'Times New Roman', serif;
-  transition: border-color 0.2s;
-}
-.btn-outline:hover { border-color: #8a7a5a; }
-
-/* Upload Zone */
-.upload-zone {
-  background: #fff;
-  border: 2px dashed #b8b8aa;
-  border-radius: 8px;
-  padding: 48px 32px;
-  text-align: center;
-  margin-bottom: 16px;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.04);
-  cursor: pointer;
-  transition: border-color 0.2s, background 0.2s;
-}
-.upload-zone:hover { border-color: #8a7a5a; }
-.upload-zone.dragover { border-color: #8a7a5a; background: #fafaf8; }
-.upload-zone .icon { color: #8a7a5a; font-size: 28px; font-weight: bold; margin-bottom: 12px; }
-.upload-zone .main-text { color: #3a3a2e; font-size: 15px; margin-bottom: 6px; font-weight: 500; }
-.upload-zone .sub-text { color: #7a7a6a; font-size: 12px; }
-.upload-zone .btn-select {
-  background: #8a7a5a;
-  color: #fff;
-  border: none;
-  padding: 10px 28px;
-  font-size: 12px;
-  font-weight: bold;
-  letter-spacing: 1px;
-  cursor: pointer;
-  border-radius: 4px;
-  margin-top: 16px;
-  font-family: 'Times New Roman', serif;
-  transition: background 0.2s;
-}
-.upload-zone .btn-select:hover { background: #7a6a4a; }
-
-/* File list */
-.file-list { margin-top: 14px; display: none; }
-.file-list.visible { display: block; }
-.file-list .summary { color: #5a5a4a; font-size: 12px; font-weight: 500; margin-bottom: 6px; }
-.file-item {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 8px 12px; background: #fafaf8; border: 1px solid #e8e8e0;
-  border-radius: 4px; margin-bottom: 4px;
-}
-.file-item .name { color: #3a3a2e; font-size: 13px; }
-.file-item .remove {
-  color: #b8b8aa; cursor: pointer; font-size: 16px; line-height: 1;
-  padding: 0 4px; transition: color 0.2s;
-}
-.file-item .remove:hover { color: #8a5a4a; }
-
-/* Translate Button */
-.translate-btn-wrap { text-align: center; margin-bottom: 16px; }
-.btn-translate {
-  background: #8a7a5a;
-  color: #fff;
-  border: none;
-  padding: 14px 52px;
-  font-size: 14px;
-  font-weight: bold;
   letter-spacing: 2px;
-  cursor: pointer;
-  border-radius: 4px;
-  box-shadow: 0 2px 8px rgba(138,122,90,0.3);
-  font-family: 'Times New Roman', serif;
-  transition: background 0.2s;
+  color: var(--gold-dark);
 }
-.btn-translate:hover { background: #7a6a4a; }
-.btn-translate:disabled { opacity: 0.5; cursor: not-allowed; }
+.glossary-bar .label::before {
+  content: '—';
+  margin-right: 6px;
+  color: var(--gold-light);
+}
+.glossary-bar .status {
+  font-size: 14px;
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+.glossary-bar .name {
+  font-size: 14px;
+  color: var(--text-secondary);
+  font-weight: 500;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.glossary-bar .actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-shrink: 0;
+}
 
-/* Loading */
-.loading { display: none; text-align: center; padding: 20px; color: #7a7a6a; font-size: 13px; }
-.loading.visible { display: block; }
-.loading .spinner {
-  display: inline-block; width: 24px; height: 24px;
-  border: 2px solid #d0d0c8; border-top-color: #8a7a5a;
-  border-radius: 50%; animation: spin 0.8s linear infinite;
+/* ========== BUTTONS ========== */
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 7px 18px;
+  font-size: 13px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-family: 'Source Serif 4', serif;
+  transition: all var(--transition);
+  letter-spacing: 0.5px;
+}
+.btn-ghost:hover {
+  border-color: var(--gold);
+  color: var(--gold-dark);
+  background: var(--surface-hover);
+  box-shadow: 0 0 0 3px var(--gold-glow);
+}
+
+/* ========== UPLOAD ZONE ========== */
+.upload-zone {
+  padding: 64px 32px 48px;
+  text-align: center;
+  margin-bottom: 24px;
+  cursor: pointer;
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  transition: all var(--transition);
+  animation: fadeSlideUp 0.5s ease both 0.15s;
+  position: relative;
+}
+.upload-zone:hover {
+  border-color: var(--gold-light);
+  background: var(--surface-hover);
+  box-shadow: 0 8px 32px rgba(44,44,36,0.06);
+}
+.upload-zone.dragover {
+  border-color: var(--gold);
+  background: var(--surface-hover);
+  box-shadow: 0 0 0 5px var(--gold-glow), 0 8px 32px rgba(44,44,36,0.08);
+  transform: scale(1.015);
+}
+.upload-zone .icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, var(--gold-light), var(--gold));
+  color: var(--text-on-gold);
+  font-size: 30px;
+  margin-bottom: 20px;
+  box-shadow: 0 6px 24px var(--gold-glow);
+  transition: transform var(--transition), box-shadow var(--transition);
+}
+.upload-zone:hover .icon-wrap {
+  transform: translateY(-3px) scale(1.05);
+  box-shadow: 0 8px 32px var(--gold-glow);
+}
+.upload-zone .main-text {
+  color: var(--text-primary);
+  font-size: 18px;
+  font-weight: 500;
+  font-family: 'Source Serif 4', serif;
+  margin-bottom: 6px;
+}
+.upload-zone .sub-text {
+  color: var(--text-tertiary);
+  font-size: 14px;
+  font-style: italic;
+}
+
+/* ========== FILE LIST ========== */
+.file-list {
+  margin-top: 20px;
+  display: none;
+  text-align: left;
+}
+.file-list.visible { display: block; animation: fadeSlideUp 0.35s ease both; }
+.file-list .summary {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-weight: 500;
   margin-bottom: 8px;
+  letter-spacing: 0.5px;
+}
+.file-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  background: var(--bg);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  margin-bottom: 5px;
+  transition: all var(--transition);
+}
+.file-item:hover {
+  border-color: var(--gold-light);
+  background: var(--surface-hover);
+}
+.file-item .name {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 500;
+}
+.file-item .remove {
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 6px;
+  transition: color var(--transition);
+}
+.file-item .remove:hover { color: var(--error-text); }
+
+/* ========== TRANSLATE BUTTON ========== */
+.translate-wrap {
+  text-align: center;
+  margin-bottom: 20px;
+  animation: fadeSlideUp 0.5s ease both 0.25s;
+}
+.btn-translate {
+  position: relative;
+  background: linear-gradient(145deg, var(--gold), var(--gold-dark));
+  color: var(--text-on-gold);
+  border: none;
+  padding: 18px 60px;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 3px;
+  cursor: pointer;
+  border-radius: 50px;
+  font-family: 'Playfair Display', serif;
+  transition: all var(--transition);
+  text-transform: uppercase;
+  box-shadow: 0 6px 28px var(--gold-glow);
+  overflow: hidden;
+}
+.btn-translate::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, transparent 30%, rgba(255,255,255,0.15) 50%, transparent 70%);
+  transition: transform var(--transition);
+  transform: translateX(-100%) skewX(-15deg);
+}
+.btn-translate:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 10px 40px var(--gold-glow);
+  background: linear-gradient(145deg, var(--gold-light), var(--gold));
+}
+.btn-translate:hover::before {
+  transform: translateX(100%) skewX(-15deg);
+}
+.btn-translate:active {
+  transform: translateY(0) scale(1);
+  box-shadow: 0 4px 16px var(--gold-glow);
+}
+.btn-translate:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}
+.btn-translate:disabled::before { display: none; }
+
+/* ========== LOADING ========== */
+.loading {
+  display: none;
+  text-align: center;
+  padding: 32px;
+  margin-bottom: 16px;
+}
+.loading.visible { display: block; animation: fadeIn 0.4s ease both; }
+.loading .spinner-ring {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 2px solid var(--border-light);
+  border-top-color: var(--gold);
+  animation: spin 0.9s linear infinite;
+  margin-bottom: 14px;
+}
+.loading .spinner-ring::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-bottom-color: var(--gold-light);
+  animation: spin 0.55s linear infinite reverse;
+}
+.loading .loading-text {
+  font-size: 14px;
+  color: var(--text-tertiary);
+  font-style: italic;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* Results Section */
+/* ========== RESULTS ========== */
 .results-section {
-  background: #fff;
-  border: 1px solid #d0d0c8;
-  border-radius: 6px;
-  padding: 22px;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+  padding: 26px;
+  animation: fadeSlideUp 0.5s ease both;
 }
 .results-section.hidden { display: none; }
 .results-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding-bottom: 12px;
-  border-bottom: 1px solid #e0e0d8;
-  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-light);
+  margin-bottom: 18px;
 }
-.results-header .title { color: #5a4a3a; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; font-weight: bold; }
-.results-header .subtitle { color: #7a7a6a; font-size: 11px; }
+.results-header .title {
+  font-family: 'Playfair Display', serif;
+  font-weight: 700;
+  font-size: 15px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--gold-dark);
+}
+.results-header .title::before {
+  content: '◆ ';
+  font-size: 11px;
+}
+.results-header .subtitle {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  font-style: italic;
+}
 
 .result-item {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 12px 14px;
-  background: #f8f8f5;
-  border-radius: 4px;
-  border: 1px solid #d8d8d0;
+  gap: 14px;
+  padding: 14px 18px;
+  background: var(--bg);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
   margin-bottom: 8px;
+  transition: all var(--transition);
+  animation: fadeSlideUp 0.4s ease both;
 }
-.result-item:last-child { margin-bottom: 0; }
-.result-item .filename { color: #3a3a2e; font-size: 13px; font-weight: 500; }
-.result-item .meta { color: #7a7a6a; font-size: 11px; margin-top: 2px; }
-.result-item .actions { display: flex; gap: 8px; }
-.btn-preview, .btn-download {
-  background: none;
-  border: 1px solid #b8b8aa;
-  color: #6a5a4a;
-  padding: 6px 12px;
-  font-size: 11px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-family: 'Times New Roman', serif;
-  transition: border-color 0.2s;
+.result-item:hover {
+  border-color: var(--gold-light);
+  box-shadow: 0 2px 12px rgba(44,44,36,0.05);
 }
-.btn-preview:hover, .btn-download:hover { border-color: #8a7a5a; }
+.result-item .info {
+  flex: 1;
+  min-width: 0;
+}
+.result-item .filename {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 500;
+}
+.result-item .meta {
+  font-size: 13px;
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.result-item .actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
 
-/* Revision Section */
-.revision-section {
-  margin-top: 18px;
-  padding: 16px;
-  background: #f8f8f5;
-  border-radius: 4px;
-  border: 1px solid #d8d8d0;
+.badge {
+  display: inline-block;
+  padding: 3px 12px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
 }
-.revision-section .title { color: #5a4a3a; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; font-weight: bold; margin-bottom: 10px; }
-.revision-section .hint { color: #6a6a5a; font-size: 12px; margin-bottom: 10px; }
+.badge-success { background: var(--success-bg); color: var(--success-text); }
+.badge-error { background: var(--error-bg); color: var(--error-text); }
+
+.btn-download {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 7px 18px;
+  font-size: 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-family: 'Source Serif 4', serif;
+  transition: all var(--transition);
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+.btn-download:hover {
+  border-color: var(--gold);
+  color: var(--gold-dark);
+  background: var(--surface-hover);
+  box-shadow: 0 0 0 3px var(--gold-glow);
+}
+
+/* ========== REVISION ========== */
+.revision-section {
+  margin-top: 22px;
+  padding: 22px;
+  background: var(--bg);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  transition: all var(--transition);
+}
+.revision-section:focus-within {
+  border-color: var(--gold-light);
+  box-shadow: 0 0 0 4px var(--gold-glow);
+}
+.revision-section .title {
+  font-family: 'Playfair Display', serif;
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--gold-dark);
+  margin-bottom: 6px;
+}
+.revision-section .hint {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  font-style: italic;
+  margin-bottom: 14px;
+}
 .revision-section textarea {
   width: 100%;
-  height: 60px;
-  border: 1px solid #b8b8aa;
-  border-radius: 4px;
-  padding: 10px;
-  font-size: 13px;
-  font-family: 'Times New Roman', serif;
-  resize: none;
-  background: #fff;
-  color: #3a3a2e;
+  height: 80px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  font-size: 14px;
+  font-family: 'Source Serif 4', 'Georgia', serif;
+  resize: vertical;
+  background: var(--surface);
+  color: var(--text-primary);
   box-sizing: border-box;
+  transition: border-color var(--transition), box-shadow var(--transition);
+  line-height: 1.6;
 }
-.revision-section textarea:focus { outline: none; border-color: #8a7a5a; }
-.revision-section .revision-actions { margin-top: 10px; display: flex; gap: 10px; align-items: center; }
-.btn-retranslate {
-  background: #8a7a5a;
-  color: #fff;
-  border: none;
-  padding: 8px 20px;
+.revision-section textarea:focus {
+  outline: none;
+  border-color: var(--gold);
+  box-shadow: 0 0 0 4px var(--gold-glow);
+}
+.revision-section textarea::placeholder {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+.revision-section .revision-actions {
+  margin-top: 14px;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+.revision-section .note {
+  color: var(--text-tertiary);
   font-size: 12px;
-  font-weight: bold;
-  cursor: pointer;
-  border-radius: 4px;
-  font-family: 'Times New Roman', serif;
-  transition: background 0.2s;
+  font-style: italic;
 }
-.btn-retranslate:hover { background: #7a6a4a; }
-.revision-section .note { color: #8a8a7a; font-size: 11px; }
 
-/* Hidden file input */
-#file-input, #glossary-input { display: none; }
+.btn-retranslate {
+  background: var(--gold);
+  color: var(--text-on-gold);
+  border: none;
+  padding: 10px 28px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  cursor: pointer;
+  border-radius: 50px;
+  font-family: 'Source Serif 4', serif;
+  transition: all var(--transition);
+  text-transform: uppercase;
+  box-shadow: 0 3px 12px var(--gold-glow);
+}
+.btn-retranslate:hover {
+  background: var(--gold-dark);
+  box-shadow: 0 6px 24px var(--gold-glow);
+  transform: translateY(-1px);
+}
 
-/* Status badge */
-.badge { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 10px; font-weight: bold; }
-.badge.success { background: #e8f0e0; color: #4a7a3a; }
-.badge.error { background: #f0e0e0; color: #8a3a3a; }
-
-/* Error toast */
+/* ========== ERROR TOAST ========== */
 .toast-error {
-  background: #f0e0e0; color: #8a3a3a; border: 1px solid #d8b8b8;
-  border-radius: 4px; padding: 10px 16px; margin-bottom: 16px;
-  font-size: 12px; display: none;
+  display: none;
+  background: var(--error-bg);
+  color: var(--error-text);
+  border: 1px solid #dcc8c4;
+  border-radius: var(--radius-sm);
+  padding: 12px 18px;
+  margin-bottom: 16px;
+  font-size: 14px;
+  line-height: 1.5;
+  animation: fadeSlideUp 0.3s ease both;
 }
 .toast-error.visible { display: block; }
+.toast-error::before { content: '⚠ '; }
+
+#file-input { display: none; }
+
+/* ========== ANIMATIONS ========== */
+@keyframes fadeSlideUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeSlideDown {
+  from { opacity: 0; transform: translateY(-12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.result-item:nth-child(1) { animation-delay: 0.05s; }
+.result-item:nth-child(2) { animation-delay: 0.1s; }
+.result-item:nth-child(3) { animation-delay: 0.15s; }
+.result-item:nth-child(4) { animation-delay: 0.2s; }
+.result-item:nth-child(5) { animation-delay: 0.25s; }
+
+/* ========== STATUS CHECK ICON ========== */
+.status-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+  position: relative;
+}
+.status-icon .check-bg {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--success-bg);
+  transform: scale(0);
+  transition: transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.status-icon.checked { border-color: var(--success-text); }
+.status-icon.checked .check-bg { transform: scale(1); }
+.status-icon svg {
+  width: 18px;
+  height: 18px;
+  position: relative;
+  z-index: 1;
+}
+.status-icon .check-path {
+  fill: none;
+  stroke: var(--success-text);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 30;
+  stroke-dashoffset: 30;
+  transition: stroke-dashoffset 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.15s;
+}
+.status-icon.checked .check-path { stroke-dashoffset: 0; }
+
+/* Revision indicator badge on result items */
+.revision-badge {
+  display: inline-block;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--gold-dark);
+  background: rgba(154, 134, 100, 0.12);
+  padding: 2px 10px;
+  border-radius: 4px;
+  font-weight: 600;
+  margin-left: 6px;
+}
+
+/* ========== PREVIEW MODAL ========== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(44, 44, 36, 0.6);
+  backdrop-filter: blur(4px);
+  z-index: 100;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: fadeIn 0.25s ease both;
+}
+.modal-overlay.visible { display: flex; }
+.modal-content {
+  background: var(--surface);
+  border-radius: var(--radius);
+  max-width: 720px;
+  width: 100%;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 64px rgba(44, 44, 36, 0.2);
+  border: 1px solid var(--border);
+  animation: fadeSlideUp 0.3s ease both;
+}
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--border-light);
+  flex-shrink: 0;
+}
+.modal-header .title {
+  font-family: 'Playfair Display', serif;
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--gold-dark);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.modal-header .title::before {
+  content: '◆ ';
+  font-size: 11px;
+}
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 22px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 4px;
+  transition: all var(--transition);
+  line-height: 1;
+}
+.modal-close:hover {
+  color: var(--text-primary);
+  background: var(--bg);
+}
+.modal-body {
+  padding: 24px;
+  overflow-y: auto;
+  font-family: 'Source Serif 4', 'Georgia', serif;
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+}
+.modal-body .file-header {
+  font-family: 'Playfair Display', serif;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--gold);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-light);
+}
+.modal-body .file-header:not(:first-child) {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border-light);
+}
+
+/* ========== RESPONSIVE ========== */
+@media (max-width: 600px) {
+  .container { padding: 32px 16px 48px; }
+  .app-header .title-en { font-size: 28px; }
+  .glossary-bar { flex-direction: column; gap: 10px; align-items: flex-start; }
+  .glossary-bar .actions { width: 100%; justify-content: flex-end; }
+  .upload-zone { padding: 44px 20px 36px; }
+  .btn-translate { padding: 14px 40px; font-size: 15px; }
+  .results-section { padding: 20px; }
+  .result-item { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .result-item .actions { align-self: flex-end; }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--gold-light); }
+
+::selection { background: var(--gold-light); color: var(--text-primary); }
 </style>
 </head>
 <body>
 <div class="container">
 
+  <!-- Header: Large artistic title -->
+  <header class="app-header">
+    <div class="title-en">
+      <span class="gold">Immigration</span><br>
+      Translation
+    </div>
+    <div class="title-cn">文件翻译工作台</div>
+    <div class="divider-line"></div>
+  </header>
+
   <!-- Error toast -->
   <div class="toast-error" id="toast-error"></div>
 
   <!-- Glossary Bar -->
-  <div class="glossary-bar">
-    <div style="display: flex; align-items: center;">
+  <div class="glossary-bar card" id="glossary-bar">
+    <div class="label-group">
       <span class="label">术语表</span>
       <span class="status" id="glossary-status">未上传</span>
     </div>
     <div class="actions">
       <span class="name" id="glossary-name" style="display:none;"></span>
-      <button class="btn-outline" id="btn-change-glossary" style="display:none;">更换</button>
-      <button class="btn-outline" id="btn-upload-glossary">上传新术语表</button>
+      <button class="btn-ghost" id="btn-change-glossary" style="display:none;">更换</button>
+      <button class="btn-ghost" id="btn-upload-glossary">上传术语表</button>
     </div>
   </div>
 
-  <!-- Upload Zone -->
-  <div class="upload-zone" id="upload-zone">
-    <div class="icon">↑</div>
-    <div class="main-text">拖拽 docx 文件到此处</div>
-    <div class="sub-text">支持批量上传 .docx 文件</div>
-    <button class="btn-select" id="btn-select-files">选择文件</button>
+  <!-- Upload Zone (click anywhere inside to upload — no separate button) -->
+  <div class="upload-zone card" id="upload-zone">
+    <div class="icon-wrap">↑</div>
+    <div class="main-text">拖拽 .docx 到此处，或点击添加文件</div>
+    <p class="sub-text">支持批量上传，每份文档独立翻译</p>
     <input type="file" id="file-input" accept=".docx" multiple>
     <div class="file-list" id="file-list"></div>
   </div>
 
-  <!-- Translate Button -->
-  <div class="translate-btn-wrap">
+  <!-- Translate Button — pill-shaped, dramatic -->
+  <div class="translate-wrap">
     <button class="btn-translate" id="btn-translate" disabled>开始翻译</button>
   </div>
 
-  <!-- Loading indicator -->
+  <!-- Loading -->
   <div class="loading" id="loading">
-    <div class="spinner"></div>
-    <div>翻译中，请稍候...</div>
+    <div class="spinner-ring"></div>
+    <div class="loading-text">翻译处理中，请稍候...</div>
   </div>
 
   <!-- Results Section -->
-  <div class="results-section hidden" id="results-section">
+  <div class="results-section card hidden" id="results-section">
     <div class="results-header">
       <span class="title">翻译结果</span>
       <span class="subtitle" id="results-count"></span>
@@ -283,28 +818,37 @@ body {
 
     <!-- Revision Section -->
     <div class="revision-section">
-      <div class="title">指出问题 / 要求修正</div>
-      <div class="hint">描述需要修正的内容，系统将重新翻译或调整</div>
-      <textarea id="feedback-text" placeholder="例如：第三段术语使用错误，应该是 XXX 而非 YYY"></textarea>
+      <div class="title">指出问题 · 要求修正</div>
+      <p class="hint">描述需要修正的内容，系统将在上下文中重新翻译</p>
+      <textarea id="feedback-text" placeholder="例如：第三段术语使用错误，应使用 XXX 而非 YYY"></textarea>
       <div class="revision-actions">
         <button class="btn-retranslate" id="btn-retranslate">重新翻译</button>
-        <span class="note">指出问题后触发重新翻译</span>
+        <span class="note">提交反馈后自动重新翻译</span>
       </div>
     </div>
   </div>
 
 </div>
 
+  <!-- Preview Modal -->
+  <div class="modal-overlay" id="modal-overlay">
+    <div class="modal-content">
+      <div class="modal-header">
+        <span class="title">翻译预览</span>
+        <button class="modal-close" id="modal-close">✕</button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+    </div>
+  </div>
+
 <script>
 const API_BASE = '/api';
 
-// State
 let glossaryId = null;
 let fileIds = [];
 let currentJobId = null;
 let uploadedFiles = [];
 
-// Elements
 const uploadZone = document.getElementById('upload-zone');
 const fileInput = document.getElementById('file-input');
 const fileListEl = document.getElementById('file-list');
@@ -335,7 +879,7 @@ btnUploadGlossary.addEventListener('click', () => {
     formData.append('file', file);
     try {
       const res = await fetch(`${API_BASE}/upload/glossary`, { method: 'POST', body: formData });
-      if (!res.ok) { const err = await res.json(); throw new Error(err.detail || 'Upload failed'); }
+      if (!res.ok) { const err = await res.json(); throw new Error(err.detail || '上传失败'); }
       const data = await res.json();
       glossaryId = data.glossary_id;
       glossaryStatus.textContent = `已就绪：${data.term_count} 条术语`;
@@ -352,21 +896,21 @@ btnUploadGlossary.addEventListener('click', () => {
   input.click();
 });
 
-btnChangeGlossary.addEventListener('click', () => {
-  btnUploadGlossary.click();
-});
+btnChangeGlossary.addEventListener('click', () => { btnUploadGlossary.click(); });
 
 // ---------------------------------------------------------------------------
-// File upload
+// File upload — click anywhere on zone
 // ---------------------------------------------------------------------------
-uploadZone.addEventListener('click', (e) => {
-  if (e.target === uploadZone || e.target.closest('.upload-zone') && !e.target.closest('.btn-select')) {
-    fileInput.click();
-  }
-});
+uploadZone.addEventListener('click', () => { fileInput.click(); });
 fileInput.addEventListener('change', handleFileSelect);
-uploadZone.addEventListener('dragover', (e) => { e.preventDefault(); uploadZone.classList.add('dragover'); });
-uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+
+uploadZone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  uploadZone.classList.add('dragover');
+});
+uploadZone.addEventListener('dragleave', () => {
+  uploadZone.classList.remove('dragover');
+});
 uploadZone.addEventListener('drop', (e) => {
   e.preventDefault();
   uploadZone.classList.remove('dragover');
@@ -380,16 +924,14 @@ async function handleFileSelect(e) {
 async function handleFiles(files) {
   const validFiles = Array.from(files).filter(f => f.name.toLowerCase().endsWith('.docx'));
   if (!validFiles.length) {
-    showError('请选择 .docx 文件');
+    showError('请选择 .docx 格式的文件');
     return;
   }
-
   const formData = new FormData();
   for (const f of validFiles) formData.append('files', f);
-
   try {
     const res = await fetch(`${API_BASE}/upload/files`, { method: 'POST', body: formData });
-    if (!res.ok) { const err = await res.json(); throw new Error(err.detail || 'Upload failed'); }
+    if (!res.ok) { const err = await res.json(); throw new Error(err.detail || '上传失败'); }
     const data = await res.json();
     fileIds = data.file_ids;
     uploadedFiles = validFiles;
@@ -402,13 +944,18 @@ async function handleFiles(files) {
 }
 
 function renderFileList(files) {
-  fileListEl.innerHTML = '<div class="summary">已选：' + files.length + ' 个文件待翻译</div>';
+  fileListEl.innerHTML = '';
+  const summary = document.createElement('div');
+  summary.className = 'summary';
+  summary.textContent = `已选 ${files.length} 个文件待翻译`;
+  fileListEl.appendChild(summary);
   fileListEl.classList.add('visible');
   Array.from(files).forEach((f, i) => {
     const div = document.createElement('div');
     div.className = 'file-item';
+    div.style.animationDelay = (i * 0.06) + 's';
     div.innerHTML = '<span class="name">' + f.name + '</span>' +
-      '<span class="remove" data-index="' + i + '">×</span>';
+      '<span class="remove" data-index="' + i + '">✕</span>';
     div.querySelector('.remove').addEventListener('click', (e) => {
       e.stopPropagation();
       removeFile(i);
@@ -451,7 +998,7 @@ btnTranslate.addEventListener('click', async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ file_ids: fileIds, glossary_id: glossaryId })
     });
-    if (!res.ok) { const err = await res.json(); throw new Error(err.detail || 'Translation failed'); }
+    if (!res.ok) { const err = await res.json(); throw new Error(err.detail || '翻译启动失败'); }
     const data = await res.json();
     currentJobId = data.job_id;
     pollStatus(currentJobId);
@@ -466,7 +1013,7 @@ async function pollStatus(jobId) {
   const interval = setInterval(async () => {
     try {
       const res = await fetch(`${API_BASE}/status/${jobId}`);
-      if (!res.ok) { clearInterval(interval); throw new Error('Status check failed'); }
+      if (!res.ok) { clearInterval(interval); throw new Error('状态检查失败'); }
       const data = await res.json();
       if (data.status === 'completed') {
         clearInterval(interval);
@@ -488,33 +1035,88 @@ async function pollStatus(jobId) {
   }, 2000);
 }
 
-function showResults(results) {
+function showResults(results, isRevision) {
   resultsSection.classList.remove('hidden');
   resultsList.innerHTML = '';
   const completed = results.filter(r => r.status === 'completed');
-  resultsCount.textContent = completed.length + '/' + results.length + ' 个文件 · 翻译完成';
+  const label = isRevision ? '已修改' : '翻译完成';
+  resultsCount.textContent = `${completed.length}/${results.length} 个文件 · ${label}`;
+
   results.forEach((r, i) => {
     const div = document.createElement('div');
     div.className = 'result-item';
     const isOk = r.status === 'completed';
-    div.innerHTML = '<div>' +
-      '<div class="filename">' + uploadedFiles[i]?.name || ('file_' + r.file_id) + '</div>' +
-      '<div class="meta">' +
-        (isOk ? '<span class="badge success">完成</span>' : '<span class="badge error">失败</span>') +
-        (r.error ? ' ' + r.error : '') +
-      '</div></div>' +
-      (isOk ? '<div class="actions"><button class="btn-download" data-job="' + currentJobId + '">下载</button></div>' : '');
-    if (isOk) {
-      div.querySelector('.btn-download').addEventListener('click', () => {
-        downloadResult(currentJobId);
-      });
-    }
-    resultsList.appendChild(div);
-  });
-}
 
-function downloadResult(jobId) {
-  window.open(`${API_BASE}/result/${jobId}`, '_blank');
+    // Status icon (checkmark circle)
+    const iconDiv = document.createElement('div');
+    iconDiv.className = 'status-icon';
+    const checkBg = document.createElement('div');
+    checkBg.className = 'check-bg';
+    iconDiv.appendChild(checkBg);
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    const path = document.createElementNS(svgNS, 'path');
+    path.setAttribute('class', 'check-path');
+    path.setAttribute('d', 'M5 13l4 4L19 7');
+    svg.appendChild(path);
+    iconDiv.appendChild(svg);
+    div.appendChild(iconDiv);
+
+    // File info
+    const infoDiv = document.createElement('div');
+    infoDiv.className = 'info';
+    const filenameEl = document.createElement('div');
+    filenameEl.className = 'filename';
+    filenameEl.textContent = uploadedFiles[i]?.name || r.file_id;
+    infoDiv.appendChild(filenameEl);
+
+    const metaDiv = document.createElement('div');
+    metaDiv.className = 'meta';
+    const badgeClass = isOk ? 'badge-success' : 'badge-error';
+    const badgeText = isOk ? (isRevision ? '已修改' : '完成') : '失败';
+    metaDiv.innerHTML = '<span class="badge ' + badgeClass + '">' + badgeText + '</span>';
+    if (r.error) {
+      metaDiv.innerHTML += '<span style="color:var(--error-text);font-size:13px;">' + r.error + '</span>';
+    }
+    if (isOk && isRevision) {
+      metaDiv.innerHTML += '<span class="revision-badge">已修订</span>';
+    }
+    infoDiv.appendChild(metaDiv);
+    div.appendChild(infoDiv);
+
+    // Action buttons
+    if (isOk) {
+      const actionsDiv = document.createElement('div');
+      actionsDiv.className = 'actions';
+      const prevBtn = document.createElement('button');
+      prevBtn.className = 'btn-download btn-preview';
+      prevBtn.textContent = '预览';
+      actionsDiv.appendChild(prevBtn);
+      const dlBtn = document.createElement('button');
+      dlBtn.className = 'btn-download';
+      dlBtn.textContent = '下载';
+      actionsDiv.appendChild(dlBtn);
+      div.appendChild(actionsDiv);
+
+      const fileId = r.file_id;
+      dlBtn.addEventListener('click', () => {
+        window.open(`${API_BASE}/result/${currentJobId}?file_id=${fileId}`, '_blank');
+      });
+      prevBtn.addEventListener('click', () => openPreview(currentJobId, fileId));
+    }
+
+    resultsList.appendChild(div);
+
+    // Animate checkmark appearing (staggered)
+    if (isOk) {
+      setTimeout(() => {
+        iconDiv.classList.add('checked');
+        // A subtle spring to the whole item
+        div.style.transform = 'scale(1)';
+      }, 200 + i * 120);
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -535,18 +1137,17 @@ btnRetranslate.addEventListener('click', async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ job_id: currentJobId, feedback })
     });
-    if (!res.ok) { const err = await res.json(); throw new Error(err.detail || 'Revision failed'); }
+    if (!res.ok) { const err = await res.json(); throw new Error(err.detail || '重新翻译失败'); }
     const data = await res.json();
     currentJobId = data.job_id;
 
-    // Poll new job
     const interval = setInterval(async () => {
       try {
         const r = await fetch(`${API_BASE}/status/${currentJobId}`);
         const d = await r.json();
         if (d.status === 'completed') {
           clearInterval(interval);
-          showResults(d.results || []);
+          showResults(d.results || [], true);
           loadingEl.classList.remove('visible');
           btnRetranslate.disabled = false;
         } else if (d.status === 'failed') {
@@ -584,6 +1185,40 @@ function showError(msg) {
 function hideError() {
   toastError.classList.remove('visible');
 }
+
+// ---------------------------------------------------------------------------
+// Preview modal
+// ---------------------------------------------------------------------------
+async function openPreview(jobId, fileId) {
+  try {
+    const res = await fetch(`${API_BASE}/preview/${jobId}?file_id=${fileId}`);
+    if (!res.ok) throw new Error('预览加载失败');
+    const data = await res.json();
+    const preview = data.previews[0];
+    if (!preview) { showError('未找到预览内容'); return; }
+    const modalBody = document.getElementById('modal-body');
+    modalBody.innerHTML = '';
+    const header = document.createElement('div');
+    header.className = 'file-header';
+    header.textContent = fileId;
+    modalBody.appendChild(header);
+    const textDiv = document.createElement('div');
+    textDiv.textContent = preview.text;
+    modalBody.appendChild(textDiv);
+    document.getElementById('modal-overlay').classList.add('visible');
+  } catch (err) {
+    showError('预览加载失败：' + err.message);
+  }
+}
+
+document.getElementById('modal-close').addEventListener('click', () => {
+  document.getElementById('modal-overlay').classList.remove('visible');
+});
+document.getElementById('modal-overlay').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) {
+    document.getElementById('modal-overlay').classList.remove('visible');
+  }
+});
 </script>
 </body>
 </html>
