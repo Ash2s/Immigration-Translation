@@ -2,12 +2,13 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from app.api import routes
 import os
+from pathlib import Path
 
 app = FastAPI(title="Immigration Translation Tool")
 
 app.include_router(routes.router, prefix="/api")
 
-static_path = os.path.join(os.path.dirname(__file__), "static")
+static_path = Path(__file__).parent.parent / "static"
 if os.path.exists(static_path):
     app.mount("/static", StaticFiles(directory=static_path), name="static")
 

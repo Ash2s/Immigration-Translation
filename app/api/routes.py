@@ -30,9 +30,5 @@ async def revise():
 
 @router.get("/glossary/{glossary_id}")
 async def get_glossary(glossary_id: str):
-    from app.services.glossary import GlossaryService
-    service = GlossaryService()
-    meta = service.get_metadata(glossary_id)
-    if not meta:
-        raise HTTPException(status_code=404, detail="Glossary not found")
-    return meta
+    """Stub — GlossaryService implemented in Task 2."""
+    raise HTTPException(status_code=404, detail="Glossary service not yet implemented")
