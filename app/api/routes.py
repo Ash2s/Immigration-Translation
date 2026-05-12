@@ -181,14 +181,18 @@ async def translate(req: TranslateRequest):
     Returns immediately with a ``job_id`` and ``status="processing"``.
     The actual translation runs in a background ``asyncio.Task``.
     """
+    custom_api = req.custom_api.model_dump() if req.custom_api else None
     job_id = str(uuid.uuid4())
     jobs[job_id] = {
         "status": "processing",
         "file_ids": req.file_ids,
         "glossary_id": req.glossary_id,
+        "custom_api": custom_api,
     }
     _save_job(job_id, jobs[job_id])
-    asyncio.create_task(run_translation(job_id, req.file_ids, req.glossary_id))
+    asyncio.create_task(
+        run_translation(job_id, req.file_ids, req.glossary_id, custom_api=custom_api)
+    )
     return JobResponse(job_id=job_id, status="processing")
 
 
@@ -292,17 +296,25 @@ async def revise(req: RevisionRequest):
     new_job_id = str(uuid.uuid4())
     file_ids = original.get("file_ids", [])
     glossary_id = original.get("glossary_id", "")
+    custom_api = (
+        req.custom_api.model_dump()
+        if req.custom_api
+        else original.get("custom_api")
+    )
 
     jobs[new_job_id] = {
         "status": "processing",
         "file_ids": file_ids,
         "glossary_id": glossary_id,
+        "custom_api": custom_api,
     }
 
     _save_job(new_job_id, jobs[new_job_id])
 
     asyncio.create_task(
-        run_translation_with_feedback(new_job_id, file_ids, glossary_id, req.feedback)
+        run_translation_with_feedback(
+            new_job_id, file_ids, glossary_id, req.feedback, custom_api=custom_api
+        )
     )
 
     return JobResponse(job_id=new_job_id, status="processing")
@@ -328,12 +340,22 @@ async def _translate_paragraphs(
     paragraphs: list[dict],
     glossary: dict[str, str],
     feedback: str | None = None,
+    custom_api: dict | None = None,
 ) -> list[dict]:
     """Translate extracted paragraphs, return formatted texts with run data.
 
     Each returned dict mirrors the input paragraph dict but with a
     ``translated_text`` key added.
     """
+    api_kw = (
+        {
+            "api_key": custom_api["api_key"],
+            "base_url": custom_api.get("base_url"),
+            "model": custom_api.get("model"),
+        }
+        if custom_api
+        else {}
+    )
     result = []
     for para_data in paragraphs:
         text = para_data["text"]
@@ -357,7 +379,7 @@ async def _translate_paragraphs(
                     f"[/REVISION_INSTRUCTION]\n"
                     f"Apply the above revision instruction when translating."
                 )
-            translated = translator_service.translate_text(prompt_text, glossary)
+            translated = translator_service.translate_text(prompt_text, glossary, **api_kw)
 
             # Check for Chinese residue and re-translate with stronger hint
             residue = TranslatorService.detect_chinese_residue(translated)
@@ -375,6 +397,7 @@ async def _translate_paragraphs(
                     "(no Chinese characters should remain):\n"
                     f"{retry_prompt}",
                     glossary,
+                    **api_kw,
                 )
 
         # Fix any remaining Chinese formatting labels
@@ -409,6 +432,7 @@ async def _process_file(
     file_id: str,
     glossary: dict[str, str],
     feedback: str | None = None,
+    custom_api: dict | None = None,
 ) -> dict:
     """Translate a single .docx file and write the output.
 
@@ -432,7 +456,9 @@ async def _process_file(
             all_texts.extend(c["text"] for c in table_cells)
 
             fmt_result = translator_service.interpret_formatting_feedback(
-                feedback, all_texts
+                feedback,
+                all_texts,
+                **(custom_api or {}),
             )
             fmt_actions = fmt_result.get("actions", [])
             needs_retranslation = fmt_result.get("needs_retranslation", True)
@@ -441,7 +467,7 @@ async def _process_file(
         if needs_retranslation:
             doc = doc_parser.read_document(file_path)
             paragraphs = doc_parser.extract_paragraphs(doc)
-            translated = await _translate_paragraphs(paragraphs, glossary, feedback)
+            translated = await _translate_paragraphs(paragraphs, glossary, feedback, custom_api)
 
             for idx, entry in enumerate(translated):
                 if idx < len(doc.paragraphs):
@@ -490,7 +516,7 @@ async def _process_file(
             # First translation: no translated doc yet, translate now
             doc = doc_parser.read_document(file_path)
             paragraphs = doc_parser.extract_paragraphs(doc)
-            translated = await _translate_paragraphs(paragraphs, glossary, feedback)
+            translated = await _translate_paragraphs(paragraphs, glossary, feedback, custom_api)
 
             for idx, entry in enumerate(translated):
                 if idx < len(doc.paragraphs):
@@ -499,14 +525,14 @@ async def _process_file(
 
             table_cells = doc_parser.extract_table_cells(doc)
             if table_cells:
-                translated_cells = await _translate_paragraphs(table_cells, glossary, feedback)
+                translated_cells = await _translate_paragraphs(table_cells, glossary, feedback, custom_api)
                 for entry in translated_cells:
                     doc_parser.apply_formatting(entry["paragraph"], entry["runs"], entry["translated_text"])
                     doc_parser.set_line_spacing(entry["paragraph"], False)
 
             textbox_paras = doc_parser.extract_textbox_paragraphs(doc)
             if textbox_paras:
-                translated_tb = await _translate_paragraphs(textbox_paras, glossary, feedback)
+                translated_tb = await _translate_paragraphs(textbox_paras, glossary, feedback, custom_api)
                 for entry in translated_tb:
                     doc_parser.apply_textbox_formatting(entry["element"], entry["runs"], entry["translated_text"])
                     doc_parser.set_textbox_line_spacing(entry["element"])
@@ -537,7 +563,10 @@ async def _process_file(
 
 
 async def run_translation(
-    job_id: str, file_ids: list[str], glossary_id: str
+    job_id: str,
+    file_ids: list[str],
+    glossary_id: str,
+    custom_api: dict | None = None,
 ) -> None:
     """Background task: translate all files in a job."""
     try:
@@ -550,7 +579,7 @@ async def run_translation(
 
     results = []
     for file_id in file_ids:
-        result = await _process_file(file_id, glossary)
+        result = await _process_file(file_id, glossary, custom_api=custom_api)
         results.append(result)
 
     jobs[job_id]["status"] = "completed"
@@ -559,7 +588,11 @@ async def run_translation(
 
 
 async def run_translation_with_feedback(
-    job_id: str, file_ids: list[str], glossary_id: str, feedback: str
+    job_id: str,
+    file_ids: list[str],
+    glossary_id: str,
+    feedback: str,
+    custom_api: dict | None = None,
 ) -> None:
     """Background task: re-translate all files with user feedback."""
     try:
@@ -572,7 +605,9 @@ async def run_translation_with_feedback(
 
     results = []
     for file_id in file_ids:
-        result = await _process_file(file_id, glossary, feedback=feedback)
+        result = await _process_file(
+            file_id, glossary, feedback=feedback, custom_api=custom_api
+        )
         results.append(result)
 
     jobs[job_id]["status"] = "completed"

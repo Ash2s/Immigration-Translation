@@ -149,15 +149,32 @@ class TranslatorService:
     # DeepSeek API translation
     # ------------------------------------------------------------------
 
+    def _make_client(
+        self,
+        api_key: str | None = None,
+        base_url: str | None = None,
+    ) -> OpenAI:
+        """Create an OpenAI client, optionally with custom credentials."""
+        if api_key:
+            return OpenAI(
+                api_key=api_key,
+                base_url=base_url or "https://api.deepseek.com",
+                http_client=httpx.Client(),
+            )
+        return self._client
+
     def translate_text(
         self,
         text: str,
         glossary: dict[str, str],
         system_override: str | None = None,
         temperature: float | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        model: str | None = None,
     ) -> str:
         """
-        Translate Chinese *text* to English via the DeepSeek API.
+        Translate Chinese *text* to English via the API.
 
         The *glossary* is injected into the system prompt to ensure technical
         terms are translated consistently.
@@ -172,6 +189,8 @@ class TranslatorService:
             If provided, use this instead of the default translation system prompt.
         temperature : float | None
             Model temperature override.  Defaults to 0.3 if not specified.
+        api_key, base_url, model : str | None
+            Custom API credentials. If omitted, uses the server defaults.
 
         Returns
         -------
@@ -179,6 +198,9 @@ class TranslatorService:
             Translated English text. If the API call fails, returns the
             original text prefixed with ``[Translation Error]: ``.
         """
+        client = self._make_client(api_key, base_url)
+        active_model = model or self._model
+
         combined = dict(COMMON_TERMS)
         combined.update(glossary)
         glossary_lines = "\n".join(
@@ -199,8 +221,8 @@ class TranslatorService:
             )
 
         try:
-            response = self._client.chat.completions.create(
-                model=self._model,
+            response = client.chat.completions.create(
+                model=active_model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": text},
@@ -239,7 +261,12 @@ class TranslatorService:
     # ------------------------------------------------------------------
 
     def interpret_formatting_feedback(
-        self, feedback: str, paragraphs_text: list[str]
+        self,
+        feedback: str,
+        paragraphs_text: list[str],
+        api_key: str | None = None,
+        base_url: str | None = None,
+        model: str | None = None,
     ) -> dict:
         """Use the model to interpret formatting feedback and identify target paragraphs.
 
@@ -306,6 +333,9 @@ class TranslatorService:
                 glossary={},
                 system_override=system_prompt,
                 temperature=0.1,
+                api_key=api_key,
+                base_url=base_url,
+                model=model,
             )
             # Extract JSON from the response
             import json

@@ -186,6 +186,68 @@ body::after {
   box-shadow: 0 0 0 3px var(--gold-glow);
 }
 
+/* ========== CUSTOM API SECTION ========== */
+.api-settings {
+  margin-bottom: 16px;
+  animation: fadeSlideUp 0.5s ease both 0.15s;
+}
+.api-settings .api-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 22px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 13px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.5px;
+  transition: color 0.2s;
+}
+.api-settings .api-toggle:hover { color: var(--gold-dark); }
+.api-settings .api-toggle .arrow {
+  display: inline-block;
+  transition: transform 0.3s ease;
+  font-size: 10px;
+}
+.api-settings .api-toggle.open .arrow { transform: rotate(90deg); }
+.api-settings .api-body {
+  display: none;
+  padding: 0 22px 18px;
+  flex-direction: column;
+  gap: 12px;
+}
+.api-settings .api-body.open { display: flex; }
+.api-settings .api-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.api-settings .api-field label {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.api-settings .api-field input {
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font-size: 14px;
+  font-family: inherit;
+  background: var(--surface);
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.api-settings .api-field input:focus {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 2px var(--gold-glow);
+}
+.api-settings .api-field input::placeholder {
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
 /* ========== UPLOAD ZONE ========== */
 .upload-zone {
   padding: 64px 32px 48px;
@@ -788,6 +850,28 @@ body::after {
     </div>
   </div>
 
+  <!-- Custom API Settings -->
+  <div class="api-settings card" id="api-settings">
+    <div class="api-toggle" id="api-toggle">
+      <span class="arrow">▶</span>
+      <span>自定义 API（可选）</span>
+    </div>
+    <div class="api-body" id="api-body">
+      <div class="api-field">
+        <label>API Key</label>
+        <input type="password" id="api-key" placeholder="sk-..." autocomplete="off">
+      </div>
+      <div class="api-field">
+        <label>接口地址</label>
+        <input type="text" id="api-base-url" value="https://api.deepseek.com" placeholder="https://api.deepseek.com">
+      </div>
+      <div class="api-field">
+        <label>模型名称</label>
+        <input type="text" id="api-model" value="deepseek-chat" placeholder="deepseek-chat">
+      </div>
+    </div>
+  </div>
+
   <!-- Upload Zone (click anywhere inside to upload — no separate button) -->
   <div class="upload-zone card" id="upload-zone">
     <div class="icon-wrap">↑</div>
@@ -848,6 +932,26 @@ let glossaryId = null;
 let fileIds = [];
 let currentJobId = null;
 let uploadedFiles = [];
+
+// ---------------------------------------------------------------------------
+// Custom API toggle
+// ---------------------------------------------------------------------------
+const apiToggle = document.getElementById('api-toggle');
+const apiBody = document.getElementById('api-body');
+apiToggle.addEventListener('click', () => {
+  apiToggle.classList.toggle('open');
+  apiBody.classList.toggle('open');
+});
+
+function getCustomAPI() {
+  const key = document.getElementById('api-key').value.trim();
+  if (!key) return null;
+  return {
+    api_key: key,
+    base_url: document.getElementById('api-base-url').value.trim() || 'https://api.deepseek.com',
+    model: document.getElementById('api-model').value.trim() || 'deepseek-chat',
+  };
+}
 
 const uploadZone = document.getElementById('upload-zone');
 const fileInput = document.getElementById('file-input');
@@ -993,10 +1097,13 @@ btnTranslate.addEventListener('click', async () => {
   hideError();
 
   try {
+    const bodyData = { file_ids: fileIds, glossary_id: glossaryId };
+    const customApi = getCustomAPI();
+    if (customApi) bodyData.custom_api = customApi;
     const res = await fetch(`${API_BASE}/translate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ file_ids: fileIds, glossary_id: glossaryId })
+      body: JSON.stringify(bodyData)
     });
     if (!res.ok) { const err = await res.json(); throw new Error(err.detail || '翻译启动失败'); }
     const data = await res.json();
@@ -1132,10 +1239,13 @@ btnRetranslate.addEventListener('click', async () => {
   hideError();
 
   try {
+    const revBody = { job_id: currentJobId, feedback };
+    const revCustomApi = getCustomAPI();
+    if (revCustomApi) revBody.custom_api = revCustomApi;
     const res = await fetch(`${API_BASE}/revise`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ job_id: currentJobId, feedback })
+      body: JSON.stringify(revBody)
     });
     if (!res.ok) { const err = await res.json(); throw new Error(err.detail || '重新翻译失败'); }
     const data = await res.json();
