@@ -33,7 +33,26 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
-  background: var(--bg);
+  background:
+    repeating-linear-gradient(
+      45deg,
+      transparent 0px,
+      transparent 39px,
+      rgba(154, 134, 100, 0.08) 39px,
+      rgba(154, 134, 100, 0.08) 40px,
+      transparent 40px,
+      transparent 79px
+    ),
+    repeating-linear-gradient(
+      -45deg,
+      transparent 0px,
+      transparent 39px,
+      rgba(154, 134, 100, 0.08) 39px,
+      rgba(154, 134, 100, 0.08) 40px,
+      transparent 40px,
+      transparent 79px
+    ),
+    var(--bg);
   font-family: 'Source Serif 4', 'Georgia', serif;
   font-variant-numeric: lining-nums tabular-nums;
   color: var(--text-primary);
@@ -81,7 +100,7 @@ body::after {
 }
 .app-header .title-en {
   font-family: 'Playfair Display', serif;
-  font-weight: 900;
+  font-weight: 700;
   font-size: 42px;
   letter-spacing: 1.2px;
   color: var(--text-primary);
@@ -103,10 +122,28 @@ body::after {
   text-transform: uppercase;
 }
 .app-header .divider-line {
-  width: 60px;
+  width: auto;
+  height: 12px;
+  margin: 14px auto 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+.app-header .divider-line::before,
+.app-header .divider-line::after {
+  content: '';
+  display: block;
+  width: 28px;
   height: 1px;
   background: var(--gold-light);
-  margin: 14px auto 0;
+}
+.app-header .divider-line .diamond {
+  display: block;
+  width: 5px;
+  height: 5px;
+  border: 1px solid var(--gold-light);
+  transform: rotate(45deg);
 }
 
 /* ========== CARD ========== */
@@ -148,7 +185,6 @@ body::after {
 .glossary-bar .status {
   font-size: 14px;
   color: var(--text-tertiary);
-  font-style: italic;
 }
 .glossary-bar .name {
   font-size: 14px;
@@ -184,6 +220,117 @@ body::after {
   color: var(--gold-dark);
   background: var(--surface-hover);
   box-shadow: 0 0 0 3px var(--gold-glow);
+}
+
+/* ========== CUSTOM API SECTION ========== */
+.api-settings {
+  margin-bottom: 16px;
+  animation: fadeSlideUp 0.5s ease both 0.15s;
+}
+.api-settings .api-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 22px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 13px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.5px;
+  transition: color 0.2s;
+}
+.api-settings .api-toggle:hover { color: var(--gold-dark); }
+.api-settings .api-toggle .arrow {
+  display: inline-block;
+  transition: transform 0.3s ease;
+  font-size: 10px;
+}
+.api-settings .api-toggle.open .arrow { transform: rotate(90deg); }
+.api-settings .api-body {
+  display: none;
+  padding: 0 22px 18px;
+  flex-direction: column;
+  gap: 12px;
+}
+.api-settings .api-body.open { display: flex; }
+.api-settings .api-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.api-settings .api-field label {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.api-settings .api-field input {
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font-size: 14px;
+  font-family: inherit;
+  background: var(--surface);
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.api-settings .api-field input:focus {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 2px var(--gold-glow);
+}
+.api-settings .api-field input::placeholder {
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+.api-settings .api-status {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.api-settings .api-status.confirmed {
+  color: var(--success-text);
+}
+.api-settings .api-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.api-settings .btn-api-test {
+  flex: 1;
+}
+.api-settings .btn-api-confirm {
+  flex: 1;
+  background: var(--gold);
+  color: var(--text-on-gold);
+  border-color: var(--gold);
+}
+.api-settings .btn-api-confirm:hover {
+  background: var(--gold-dark);
+  border-color: var(--gold-dark);
+  color: var(--text-on-gold);
+}
+.api-settings .api-test-result {
+  margin-top: 8px;
+  font-size: 13px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  display: none;
+}
+.api-settings .api-test-result.success {
+  display: block;
+  background: var(--success-bg);
+  color: var(--success-text);
+}
+.api-settings .api-test-result.error {
+  display: block;
+  background: var(--error-bg);
+  color: var(--error-text);
+}
+.api-settings .api-field input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* ========== UPLOAD ZONE ========== */
@@ -237,7 +384,6 @@ body::after {
 .upload-zone .sub-text {
   color: var(--text-tertiary);
   font-size: 14px;
-  font-style: italic;
 }
 
 /* ========== FILE LIST ========== */
@@ -335,40 +481,228 @@ body::after {
 }
 .btn-translate:disabled::before { display: none; }
 
-/* ========== LOADING ========== */
-.loading {
+/* =============================================================
+   PROGRESS SECTION — "Translation Studio" aesthetic
+   ============================================================= */
+.progress-section {
   display: none;
-  text-align: center;
-  padding: 32px;
-  margin-bottom: 16px;
-}
-.loading.visible { display: block; animation: fadeIn 0.4s ease both; }
-.loading .spinner-ring {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 2px 12px rgba(44,44,36,0.05);
+  padding: 28px 28px 24px;
+  margin-bottom: 24px;
   position: relative;
-  display: inline-block;
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  border: 2px solid var(--border-light);
-  border-top-color: var(--gold);
-  animation: spin 0.9s linear infinite;
-  margin-bottom: 14px;
+  overflow: hidden;
 }
-.loading .spinner-ring::after {
+.progress-section.visible {
+  display: block;
+  animation: fadeSlideUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+/* Subtle ornamental top accent */
+.progress-section::before {
   content: '';
   position: absolute;
-  inset: -3px;
-  border-radius: 50%;
-  border: 2px solid transparent;
-  border-bottom-color: var(--gold-light);
-  animation: spin 0.55s linear infinite reverse;
+  top: 0;
+  left: 28px;
+  right: 28px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold-light), transparent);
 }
-.loading .loading-text {
-  font-size: 14px;
+
+/* --- metrics row: ring + overview --- */
+.progress-metrics {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-bottom: 22px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border-light);
+}
+.progress-ring-wrap {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  flex-shrink: 0;
+}
+.progress-ring-wrap svg {
+  display: block;
+}
+.progress-ring-bg {
+  fill: none;
+  stroke: var(--border-light);
+  stroke-width: 4;
+}
+.progress-ring-fill {
+  fill: none;
+  stroke: var(--gold);
+  stroke-width: 4.5;
+  stroke-linecap: round;
+  stroke-dasharray: 201;
+  stroke-dashoffset: 201;
+  transform: rotate(-90deg);
+  transform-origin: center;
+  transition: stroke-dashoffset 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.progress-pct {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Playfair Display', serif;
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--gold-dark);
+  letter-spacing: -0.5px;
+}
+.progress-overview {
+  flex: 1;
+  min-width: 0;
+}
+.progress-title {
+  font-family: 'Playfair Display', serif;
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--text-primary);
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+}
+.progress-detail {
+  font-size: 13px;
   color: var(--text-tertiary);
-  font-style: italic;
 }
-@keyframes spin { to { transform: rotate(360deg); } }
+
+/* --- file list in progress --- */
+.progress-files {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.progress-file {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 400;
+  transition: all 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.progress-file.pf-pending {
+  color: var(--text-tertiary);
+  opacity: 0.6;
+}
+.progress-file.pf-active {
+  color: var(--text-primary);
+  background: rgba(154, 134, 100, 0.07);
+}
+.progress-file.pf-done {
+  color: var(--text-secondary);
+}
+.progress-file .pf-icon {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  transition: all 0.5s ease;
+  position: relative;
+}
+/* pending: empty circle */
+.progress-file.pf-pending .pf-icon { border-color: var(--border); }
+/* active: pulsing dot */
+.progress-file.pf-active .pf-icon {
+  border-color: var(--gold);
+  animation: pfPulse 1.6s ease-in-out infinite;
+}
+.progress-file.pf-active .pf-icon::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--gold);
+  animation: pfBlip 1.6s ease-in-out infinite;
+}
+/* done: checkmark */
+.progress-file.pf-done .pf-icon {
+  border-color: var(--success-text);
+  background: var(--success-bg);
+}
+.progress-file.pf-done .pf-icon::after {
+  content: '';
+  width: 5px;
+  height: 9px;
+  border: solid var(--success-text);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+  margin-top: -2px;
+}
+.progress-file .pf-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.progress-file .pf-name .ext {
+  color: var(--text-tertiary);
+}
+@keyframes pfPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(154, 134, 100, 0.3); }
+  50% { box-shadow: 0 0 0 7px rgba(154, 134, 100, 0); }
+}
+@keyframes pfBlip {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* --- status bar at bottom --- */
+.progress-status-bar {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-light);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+}
+.progress-status-bar .status-msg {
+  color: var(--text-tertiary);
+  transition: opacity 0.3s ease;
+  flex: 1;
+}
+.progress-status-bar .status-msg .highlight {
+  color: var(--gold-dark);
+  font-style: normal;
+  font-weight: 500;
+}
+.progress-status-bar .status-percent {
+  font-family: 'Playfair Display', serif;
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--gold-dark);
+  letter-spacing: -0.5px;
+  margin-left: 12px;
+  flex-shrink: 0;
+}
+@keyframes dots {
+  0%, 20% { opacity: 0; }
+  40% { opacity: 1; }
+  60%, 100% { opacity: 0; }
+}
+.progress-status-bar .status-msg .dot-anim {
+  display: inline-block;
+  animation: dots 1.4s ease infinite;
+}
+.progress-status-bar .status-msg .dot-anim:nth-child(2) { animation-delay: 0.2s; }
+.progress-status-bar .status-msg .dot-anim:nth-child(3) { animation-delay: 0.4s; }
 
 /* ========== RESULTS ========== */
 .results-section {
@@ -399,7 +733,6 @@ body::after {
 .results-header .subtitle {
   font-size: 13px;
   color: var(--text-tertiary);
-  font-style: italic;
 }
 
 .result-item {
@@ -497,7 +830,6 @@ body::after {
 .revision-section .hint {
   font-size: 13px;
   color: var(--text-tertiary);
-  font-style: italic;
   margin-bottom: 14px;
 }
 .revision-section textarea {
@@ -522,18 +854,17 @@ body::after {
 }
 .revision-section textarea::placeholder {
   color: var(--text-tertiary);
-  font-style: italic;
 }
 .revision-section .revision-actions {
   margin-top: 14px;
   display: flex;
-  gap: 14px;
+  justify-content: space-between;
   align-items: center;
+  gap: 14px;
 }
 .revision-section .note {
   color: var(--text-tertiary);
   font-size: 12px;
-  font-style: italic;
 }
 
 .btn-retranslate {
@@ -718,7 +1049,12 @@ body::after {
   font-size: 14px;
   line-height: 1.8;
   color: var(--text-primary);
-  white-space: pre-wrap;
+}
+.preview-para {
+  margin-bottom: 10px;
+}
+.preview-para.preview-empty {
+  height: 0.8em;
 }
 .modal-body .file-header {
   font-family: 'Playfair Display', serif;
@@ -769,7 +1105,7 @@ body::after {
       Translation
     </div>
     <div class="title-cn">文件翻译工作台</div>
-    <div class="divider-line"></div>
+    <div class="divider-line"><span class="diamond"></span></div>
   </header>
 
   <!-- Error toast -->
@@ -788,6 +1124,34 @@ body::after {
     </div>
   </div>
 
+  <!-- Custom API Settings -->
+  <div class="api-settings card" id="api-settings">
+    <div class="api-toggle" id="api-toggle">
+      <span class="arrow">▶</span>
+      <span>自定义 API（可选）</span>
+      <span class="api-status" id="api-status"></span>
+    </div>
+    <div class="api-body" id="api-body">
+      <div class="api-field">
+        <label>API Key</label>
+        <input type="password" id="api-key" placeholder="sk-..." autocomplete="off">
+      </div>
+      <div class="api-field">
+        <label>接口地址</label>
+        <input type="text" id="api-base-url" value="https://api.deepseek.com" placeholder="https://api.deepseek.com">
+      </div>
+      <div class="api-field">
+        <label>模型名称</label>
+        <input type="text" id="api-model" value="deepseek-v4-flash" placeholder="deepseek-v4-flash">
+      </div>
+      <div class="api-actions">
+        <button class="btn-ghost btn-api-test" id="btn-api-test">测试连接</button>
+        <button class="btn-ghost btn-api-confirm" id="btn-api-confirm">确认</button>
+      </div>
+      <div class="api-test-result" id="api-test-result"></div>
+    </div>
+  </div>
+
   <!-- Upload Zone (click anywhere inside to upload — no separate button) -->
   <div class="upload-zone card" id="upload-zone">
     <div class="icon-wrap">↑</div>
@@ -802,17 +1166,36 @@ body::after {
     <button class="btn-translate" id="btn-translate" disabled>开始翻译</button>
   </div>
 
-  <!-- Loading -->
-  <div class="loading" id="loading">
-    <div class="spinner-ring"></div>
-    <div class="loading-text">翻译处理中，请稍候...</div>
+  <!-- Progress Section -->
+  <div class="progress-section" id="progress-section">
+    <div class="progress-metrics">
+      <div class="progress-ring-wrap">
+        <svg width="72" height="72" viewBox="0 0 72 72">
+          <circle class="progress-ring-bg" cx="36" cy="36" r="32"/>
+          <circle class="progress-ring-fill" cx="36" cy="36" r="32" id="progress-ring"/>
+        </svg>
+        <div class="progress-pct" id="progress-pct">0%</div>
+      </div>
+      <div class="progress-overview">
+        <div class="progress-title" id="progress-title">翻译处理中</div>
+        <div class="progress-detail" id="progress-detail">正在准备...</div>
+      </div>
+    </div>
+    <div class="progress-files" id="progress-files"></div>
+    <div class="progress-status-bar">
+      <span class="status-msg" id="progress-msg">正在启动<span class="dot-anim">.</span><span class="dot-anim">.</span><span class="dot-anim">.</span></span>
+      <span class="status-percent" id="progress-percent">0%</span>
+    </div>
   </div>
 
   <!-- Results Section -->
   <div class="results-section card hidden" id="results-section">
     <div class="results-header">
       <span class="title">翻译结果</span>
-      <span class="subtitle" id="results-count"></span>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button class="btn-download" id="btn-download-all" style="display:none;">下载全部</button>
+        <span class="subtitle" id="results-count"></span>
+      </div>
     </div>
     <div id="results-list"></div>
 
@@ -822,8 +1205,8 @@ body::after {
       <p class="hint">描述需要修正的内容，系统将在上下文中重新翻译</p>
       <textarea id="feedback-text" placeholder="例如：第三段术语使用错误，应使用 XXX 而非 YYY"></textarea>
       <div class="revision-actions">
-        <button class="btn-retranslate" id="btn-retranslate">重新翻译</button>
         <span class="note">提交反馈后自动重新翻译</span>
+        <button class="btn-retranslate" id="btn-retranslate">重新翻译</button>
       </div>
     </div>
   </div>
@@ -849,6 +1232,100 @@ let fileIds = [];
 let currentJobId = null;
 let uploadedFiles = [];
 
+// ---------------------------------------------------------------------------
+// Custom API — confirm + test
+// ---------------------------------------------------------------------------
+let confirmedApi = null;
+
+const apiToggle = document.getElementById('api-toggle');
+const apiBody = document.getElementById('api-body');
+apiToggle.addEventListener('click', (e) => {
+  // Don't toggle when clicking the status badge
+  if (e.target.closest('.api-status')) return;
+  apiToggle.classList.toggle('open');
+  apiBody.classList.toggle('open');
+});
+
+const apiKeyInput = document.getElementById('api-key');
+const apiBaseInput = document.getElementById('api-base-url');
+const apiModelInput = document.getElementById('api-model');
+const apiStatus = document.getElementById('api-status');
+const apiTestResult = document.getElementById('api-test-result');
+const btnApiTest = document.getElementById('btn-api-test');
+const btnApiConfirm = document.getElementById('btn-api-confirm');
+
+// Reset confirmation when any field changes
+[apiKeyInput, apiBaseInput, apiModelInput].forEach(el => {
+  el.addEventListener('input', () => {
+    confirmedApi = null;
+    apiStatus.textContent = '';
+    apiStatus.className = 'api-status';
+    [apiKeyInput, apiBaseInput, apiModelInput].forEach(i => i.disabled = false);
+  });
+});
+
+function getCustomAPI() {
+  return confirmedApi;
+}
+
+function readApiForm() {
+  const key = apiKeyInput.value.trim();
+  if (!key) return null;
+  return {
+    api_key: key,
+    base_url: apiBaseInput.value.trim() || 'https://api.deepseek.com',
+    model: apiModelInput.value.trim() || 'deepseek-v4-flash',
+  };
+}
+
+// Confirm button
+btnApiConfirm.addEventListener('click', () => {
+  const cfg = readApiForm();
+  if (!cfg) {
+    apiStatus.textContent = '请输入 API Key';
+    apiStatus.className = 'api-status';
+    return;
+  }
+  confirmedApi = cfg;
+  apiStatus.textContent = '✓ 已确认';
+  apiStatus.className = 'api-status confirmed';
+  [apiKeyInput, apiBaseInput, apiModelInput].forEach(i => i.disabled = true);
+});
+
+// Test connection button
+btnApiTest.addEventListener('click', async () => {
+  const cfg = readApiForm();
+  if (!cfg) {
+    apiTestResult.textContent = '请先填写 API Key';
+    apiTestResult.className = 'api-test-result error';
+    return;
+  }
+  btnApiTest.disabled = true;
+  btnApiTest.textContent = '测试中...';
+  apiTestResult.className = 'api-test-result';
+  try {
+    const res = await fetch(`${API_BASE}/test-api`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cfg),
+    });
+    const data = await res.json();
+    if (data.status === 'ok') {
+      apiTestResult.textContent = '✓ ' + data.message;
+      apiTestResult.className = 'api-test-result success';
+    } else {
+      apiTestResult.textContent = '✗ ' + (data.message || '连接失败');
+      apiTestResult.className = 'api-test-result error';
+    }
+  } catch (err) {
+    apiTestResult.textContent = '✗ 网络错误：' + err.message;
+    apiTestResult.className = 'api-test-result error';
+  } finally {
+    btnApiTest.disabled = false;
+    btnApiTest.textContent = '测试连接';
+  }
+});
+
 const uploadZone = document.getElementById('upload-zone');
 const fileInput = document.getElementById('file-input');
 const fileListEl = document.getElementById('file-list');
@@ -859,10 +1336,18 @@ const btnUploadGlossary = document.getElementById('btn-upload-glossary');
 const resultsSection = document.getElementById('results-section');
 const resultsList = document.getElementById('results-list');
 const resultsCount = document.getElementById('results-count');
-const loadingEl = document.getElementById('loading');
+const progressSection = document.getElementById('progress-section');
+const progressRing = document.getElementById('progress-ring');
+const progressPct = document.getElementById('progress-pct');
+const progressTitle = document.getElementById('progress-title');
+const progressDetail = document.getElementById('progress-detail');
+const progressFiles = document.getElementById('progress-files');
+const progressMsg = document.getElementById('progress-msg');
+const progressPercent = document.getElementById('progress-percent');
 const feedbackText = document.getElementById('feedback-text');
 const btnTranslate = document.getElementById('btn-translate');
 const btnRetranslate = document.getElementById('btn-retranslate');
+const btnDownloadAll = document.getElementById('btn-download-all');
 const toastError = document.getElementById('toast-error');
 
 // ---------------------------------------------------------------------------
@@ -988,15 +1473,19 @@ btnTranslate.addEventListener('click', async () => {
   if (!fileIds.length) { showError('请先上传要翻译的文件'); return; }
 
   btnTranslate.disabled = true;
-  loadingEl.classList.add('visible');
+  progressSection.classList.add('visible');
   resultsSection.classList.add('hidden');
+  renderProgressInit();
   hideError();
 
   try {
+    const bodyData = { file_ids: fileIds, glossary_id: glossaryId };
+    const customApi = getCustomAPI();
+    if (customApi) bodyData.custom_api = customApi;
     const res = await fetch(`${API_BASE}/translate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ file_ids: fileIds, glossary_id: glossaryId })
+      body: JSON.stringify(bodyData)
     });
     if (!res.ok) { const err = await res.json(); throw new Error(err.detail || '翻译启动失败'); }
     const data = await res.json();
@@ -1004,10 +1493,97 @@ btnTranslate.addEventListener('click', async () => {
     pollStatus(currentJobId);
   } catch (err) {
     showError('翻译启动失败：' + err.message);
-    loadingEl.classList.remove('visible');
+    progressSection.classList.remove('visible');
     btnTranslate.disabled = false;
   }
 });
+
+// ---------------------------------------------------------------------------
+// Progress display
+// ---------------------------------------------------------------------------
+const RING_CIRCUMFERENCE = 201;
+
+function renderProgressInit() {
+  // Show file list skeleton — all pending
+  progressFiles.innerHTML = '';
+  uploadedFiles.forEach((f, i) => {
+    const div = document.createElement('div');
+    div.className = 'progress-file pf-pending';
+    div.style.animationDelay = (i * 0.06) + 's';
+    div.innerHTML = '<div class="pf-icon"></div><span class="pf-name">' + escapeHtml(f.name) + '</span>';
+    div.dataset.index = i;
+    progressFiles.appendChild(div);
+  });
+  updateProgressRing(0);
+  progressPct.textContent = '0%';
+  progressPercent.textContent = '0%';
+  progressTitle.textContent = '翻译处理中';
+  progressDetail.textContent = '连接 AI 服务...';
+  progressMsg.innerHTML = '正在启动<span class="dot-anim">.</span><span class="dot-anim">.</span><span class="dot-anim">.</span>';
+}
+
+function updateProgressRing(pct) {
+  const offset = RING_CIRCUMFERENCE - (RING_CIRCUMFERENCE * pct / 100);
+  progressRing.style.strokeDashoffset = offset;
+}
+
+function renderProgress(prog) {
+  // Update ring & percentages
+  const total = prog.total || 1;
+  const done = prog.completed || 0;
+  const fullDone = Math.floor(done);
+  const pct = Math.min(100, Math.round((done / total) * 100));
+  updateProgressRing(pct);
+  progressPct.textContent = pct + '%';
+  progressPercent.textContent = pct + '%';
+
+  // Update file items
+  const items = progressFiles.querySelectorAll('.progress-file');
+  let activeName = '';
+  items.forEach((item, i) => {
+    item.className = 'progress-file';
+    if (i < fullDone) {
+      item.classList.add('pf-done');
+    } else if (i === fullDone && prog.stage !== 'done') {
+      item.classList.add('pf-active');
+      activeName = item.querySelector('.pf-name').textContent;
+    } else {
+      item.classList.add('pf-pending');
+    }
+  });
+
+  // Update title & detail & status bar
+  if (prog.stage === 'starting') {
+    progressTitle.textContent = '准备就绪';
+    progressDetail.textContent = '即将开始翻译...';
+    progressMsg.innerHTML = '正在准备文件<span class="dot-anim">.</span><span class="dot-anim">.</span><span class="dot-anim">.</span>';
+  } else if (prog.stage === 'translating') {
+    progressTitle.textContent = '翻译处理中';
+    if (prog.detail) {
+      progressMsg.innerHTML = '<span class="highlight">' + escapeHtml(prog.detail) + '</span><span class="dot-anim">.</span><span class="dot-anim">.</span><span class="dot-anim">.</span>';
+    } else if (prog.current_file) {
+      progressMsg.innerHTML = '<span class="highlight">' + escapeHtml(prog.current_file) + '</span> 翻译中<span class="dot-anim">.</span><span class="dot-anim">.</span><span class="dot-anim">.</span>';
+    } else {
+      progressMsg.innerHTML = '正在翻译<span class="dot-anim">.</span><span class="dot-anim">.</span><span class="dot-anim">.</span>';
+    }
+    // Show file count detail
+    if (total > 1) {
+      progressDetail.textContent = '正在处理 ' + (fullDone + 1) + '/' + total + ' 个文件';
+    } else {
+      progressDetail.textContent = '进度 ' + pct + '%';
+    }
+  } else if (prog.stage === 'done') {
+    progressTitle.textContent = '处理完成';
+    progressDetail.textContent = '全部 ' + total + ' 个文件翻译完毕';
+    progressMsg.textContent = '合并结果中...';
+  }
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
 
 async function pollStatus(jobId) {
   const interval = setInterval(async () => {
@@ -1017,19 +1593,40 @@ async function pollStatus(jobId) {
       const data = await res.json();
       if (data.status === 'completed') {
         clearInterval(interval);
-        showResults(data.results || []);
-        loadingEl.classList.remove('visible');
+        // Quick 100% celebration then show results
+        updateProgressRing(100);
+        progressPct.textContent = '100%';
+        progressPercent.textContent = '100%';
+        progressTitle.textContent = '处理完成';
+        progressDetail.textContent = '正在加载结果...';
+        progressMsg.textContent = '翻译已完成';
+        // Show done state on all file items
+        progressFiles.querySelectorAll('.progress-file').forEach(el => {
+          el.className = 'progress-file pf-done';
+        });
+        setTimeout(() => {
+          progressSection.classList.remove('visible');
+          showResults(data.results || []);
+        }, 600);
         btnTranslate.disabled = false;
       } else if (data.status === 'failed') {
         clearInterval(interval);
         showError('翻译失败：' + (data.error || '未知错误'));
-        loadingEl.classList.remove('visible');
+        progressSection.classList.remove('visible');
         btnTranslate.disabled = false;
+      } else {
+        if (data.progress) {
+          renderProgress(data.progress);
+        } else {
+          // Fallback: show connecting state when progress not yet available
+          progressMsg.innerHTML = '正在连接 AI 服务<span class="dot-anim">.</span><span class="dot-anim">.</span><span class="dot-anim">.</span>';
+          progressDetail.textContent = '等待翻译任务启动...';
+        }
       }
     } catch (err) {
       clearInterval(interval);
       showError('状态检查失败：' + err.message);
-      loadingEl.classList.remove('visible');
+      progressSection.classList.remove('visible');
       btnTranslate.disabled = false;
     }
   }, 2000);
@@ -1040,6 +1637,7 @@ function showResults(results, isRevision) {
   resultsList.innerHTML = '';
   const completed = results.filter(r => r.status === 'completed');
   const label = isRevision ? '已修改' : '翻译完成';
+  btnDownloadAll.style.display = completed.length > 1 ? 'inline' : 'none';
   resultsCount.textContent = `${completed.length}/${results.length} 个文件 · ${label}`;
 
   results.forEach((r, i) => {
@@ -1128,14 +1726,18 @@ btnRetranslate.addEventListener('click', async () => {
   if (!feedback) { showError('请先描述需要修正的问题'); return; }
 
   btnRetranslate.disabled = true;
-  loadingEl.classList.add('visible');
+  progressSection.classList.add('visible');
+  renderProgressInit();
   hideError();
 
   try {
+    const revBody = { job_id: currentJobId, feedback };
+    const revCustomApi = getCustomAPI();
+    if (revCustomApi) revBody.custom_api = revCustomApi;
     const res = await fetch(`${API_BASE}/revise`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ job_id: currentJobId, feedback })
+      body: JSON.stringify(revBody)
     });
     if (!res.ok) { const err = await res.json(); throw new Error(err.detail || '重新翻译失败'); }
     const data = await res.json();
@@ -1147,27 +1749,42 @@ btnRetranslate.addEventListener('click', async () => {
         const d = await r.json();
         if (d.status === 'completed') {
           clearInterval(interval);
-          showResults(d.results || [], true);
-          loadingEl.classList.remove('visible');
+          progressFiles.querySelectorAll('.progress-file').forEach(el => {
+            el.className = 'progress-file pf-done';
+          });
+          setTimeout(() => {
+            progressSection.classList.remove('visible');
+            showResults(d.results || [], true);
+          }, 500);
           btnRetranslate.disabled = false;
         } else if (d.status === 'failed') {
           clearInterval(interval);
           showError('重新翻译失败：' + (d.error || '未知错误'));
-          loadingEl.classList.remove('visible');
+          progressSection.classList.remove('visible');
           btnRetranslate.disabled = false;
+        } else {
+          if (d.progress) renderProgress(d.progress);
         }
       } catch (err) {
         clearInterval(interval);
         showError('状态检查失败');
-        loadingEl.classList.remove('visible');
+        progressSection.classList.remove('visible');
         btnRetranslate.disabled = false;
       }
     }, 2000);
   } catch (err) {
     showError('重新翻译启动失败：' + err.message);
-    loadingEl.classList.remove('visible');
+    progressSection.classList.remove('visible');
     btnRetranslate.disabled = false;
   }
+});
+
+// ---------------------------------------------------------------------------
+// Download All
+// ---------------------------------------------------------------------------
+btnDownloadAll.addEventListener('click', () => {
+  if (!currentJobId) return;
+  window.open(`${API_BASE}/download-all/${currentJobId}`, '_blank');
 });
 
 // ---------------------------------------------------------------------------
@@ -1189,6 +1806,37 @@ function hideError() {
 // ---------------------------------------------------------------------------
 // Preview modal
 // ---------------------------------------------------------------------------
+function renderRun(run) {
+  let text = run.text;
+  if (!text) return '';
+  // Escape HTML
+  text = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  if (!run.bold && !run.italic && !run.underline && !run.color && !run.font_size) {
+    return text;
+  }
+  let style = '';
+  if (run.bold) style += 'font-weight:700;';
+  if (run.italic) style += 'font-style:italic;';
+  if (run.underline) style += 'text-decoration:underline;';
+  if (run.color) style += `color:#${run.color};`;
+  if (run.font_size) style += `font-size:${run.font_size}pt;`;
+  if (run.font_name) style += `font-family:'${run.font_name.replace(/'/g, "\\'")}',serif;`;
+  return `<span style="${style}">${text}</span>`;
+}
+
+function renderParagraph(para) {
+  if (!para.text.trim()) {
+    return '<div class="preview-para preview-empty"></div>';
+  }
+  let alignStyle = '';
+  if (para.alignment === 0) alignStyle = 'text-align:left;';
+  else if (para.alignment === 1) alignStyle = 'text-align:center;';
+  else if (para.alignment === 2) alignStyle = 'text-align:right;';
+  else if (para.alignment === 3) alignStyle = 'text-align:justify;';
+  const runsHtml = para.runs.map(renderRun).join('');
+  return `<div class="preview-para" style="${alignStyle}">${runsHtml}</div>`;
+}
+
 async function openPreview(jobId, fileId) {
   try {
     const res = await fetch(`${API_BASE}/preview/${jobId}?file_id=${fileId}`);
@@ -1202,9 +1850,13 @@ async function openPreview(jobId, fileId) {
     header.className = 'file-header';
     header.textContent = fileId;
     modalBody.appendChild(header);
-    const textDiv = document.createElement('div');
-    textDiv.textContent = preview.text;
-    modalBody.appendChild(textDiv);
+    const contentDiv = document.createElement('div');
+    if (preview.paragraphs) {
+      contentDiv.innerHTML = preview.paragraphs.map(renderParagraph).join('');
+    } else {
+      contentDiv.textContent = '[文件不存在]';
+    }
+    modalBody.appendChild(contentDiv);
     document.getElementById('modal-overlay').classList.add('visible');
   } catch (err) {
     showError('预览加载失败：' + err.message);

@@ -90,7 +90,10 @@ class TranslatorService:
         self._client = OpenAI(
             api_key=settings.DEEPSEEK_API_KEY,
             base_url="https://api.deepseek.com",
-            http_client=httpx.Client(),
+            http_client=httpx.Client(
+                transport=httpx.HTTPTransport(),
+                timeout=httpx.Timeout(60.0, connect=10.0),
+            ),
         )
         self._model = settings.DEEPSEEK_MODEL
 
@@ -149,15 +152,33 @@ class TranslatorService:
     # DeepSeek API translation
     # ------------------------------------------------------------------
 
+    def _make_client(
+        self,
+        api_key: str | None = None,
+        base_url: str | None = None,
+    ) -> OpenAI:
+        """Create an OpenAI client (always fresh for thread safety)."""
+        return OpenAI(
+            api_key=api_key or settings.DEEPSEEK_API_KEY,
+            base_url=base_url or "https://api.deepseek.com",
+            http_client=httpx.Client(
+                transport=httpx.HTTPTransport(),
+                timeout=httpx.Timeout(60.0, connect=10.0),
+            ),
+        )
+
     def translate_text(
         self,
         text: str,
         glossary: dict[str, str],
         system_override: str | None = None,
         temperature: float | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        model: str | None = None,
     ) -> str:
         """
-        Translate Chinese *text* to English via the DeepSeek API.
+        Translate Chinese *text* to English via the API.
 
         The *glossary* is injected into the system prompt to ensure technical
         terms are translated consistently.
@@ -172,6 +193,8 @@ class TranslatorService:
             If provided, use this instead of the default translation system prompt.
         temperature : float | None
             Model temperature override.  Defaults to 0.3 if not specified.
+        api_key, base_url, model : str | None
+            Custom API credentials. If omitted, uses the server defaults.
 
         Returns
         -------
@@ -179,6 +202,9 @@ class TranslatorService:
             Translated English text. If the API call fails, returns the
             original text prefixed with ``[Translation Error]: ``.
         """
+        client = self._make_client(api_key, base_url)
+        active_model = model or self._model
+
         combined = dict(COMMON_TERMS)
         combined.update(glossary)
         glossary_lines = "\n".join(
@@ -194,13 +220,15 @@ class TranslatorService:
                 "Use the provided glossary for technical terms:\n"
                 f"{glossary_lines}\n\n"
                 "Preserve formatting markers such as (Seal), (Signature), [Image], [Barcode].\n"
+                "Convert Chinese numbered lists (一、二、三… / 第一、第二、第三… / 1、2、3… / (一)(二)…) "
+                "to English format (I. II. III. / 1. 2. 3. / (1) (2)…).\n"
                 "Use Times New Roman style, formal tone, and double line spacing.\n"
                 "Output only the translated text, no explanations."
             )
 
         try:
-            response = self._client.chat.completions.create(
-                model=self._model,
+            response = client.chat.completions.create(
+                model=active_model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": text},
@@ -239,7 +267,12 @@ class TranslatorService:
     # ------------------------------------------------------------------
 
     def interpret_formatting_feedback(
-        self, feedback: str, paragraphs_text: list[str]
+        self,
+        feedback: str,
+        paragraphs_text: list[str],
+        api_key: str | None = None,
+        base_url: str | None = None,
+        model: str | None = None,
     ) -> dict:
         """Use the model to interpret formatting feedback and identify target paragraphs.
 
@@ -306,6 +339,9 @@ class TranslatorService:
                 glossary={},
                 system_override=system_prompt,
                 temperature=0.1,
+                api_key=api_key,
+                base_url=base_url,
+                model=model,
             )
             # Extract JSON from the response
             import json
@@ -324,6 +360,55 @@ class TranslatorService:
         return {"needs_retranslation": False, "actions": []}
 
     @staticmethod
+    def _cn_numeral(n: int) -> str:
+        """Return Chinese numeral *n* (1-10) as the character."""
+        return ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'][n - 1]
+
+    @staticmethod
+    def _roman_numeral(n: int) -> str:
+        """Return Roman numeral for *n* (1-10)."""
+        return ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'][n - 1]
+
+    @staticmethod
+    def _build_cn_enum_pattern() -> list[tuple[re.Pattern, str]]:
+        """Build regex patterns for Chinese enumeration markers.
+
+        Returns a list of ``(compiled_regex, replacement_template)`` tuples.
+        """
+        patterns = []
+        for i in range(1, 11):
+            cn = TranslatorService._cn_numeral(i)
+            roman = TranslatorService._roman_numeral(i)
+            # Line-start: "一、" → "I."
+            patterns.append((
+                re.compile(rf'(?<![^\s]){re.escape(cn)}、'),
+                f'{roman}.',
+            ))
+            # Ordinal prefix: "第一、" → "I."
+            patterns.append((
+                re.compile(rf'(?<![^\s])第{re.escape(cn)}、'),
+                f'{roman}.',
+            ))
+            # Parenthesized halfwidth: "(一)" → "(I)"
+            patterns.append((
+                re.compile(rf'\(({re.escape(cn)})\)'),
+                rf'({roman})',
+            ))
+            # Parenthesized fullwidth: "（一）" → "(I)"
+            patterns.append((
+                re.compile(rf'（{re.escape(cn)}）'),
+                rf'({roman})',
+            ))
+
+        # Arabic numeral with Chinese enumeration comma: "1、" → "1."
+        for i in range(0, 10):
+            patterns.append((
+                re.compile(rf'(?<![^\s]){i}、'),
+                f'{i}.',
+            ))
+        return patterns
+
+    @staticmethod
     def fix_cn_labels(text: str) -> str:
         """
         Replace common Chinese formatting labels with their English equivalents.
@@ -335,6 +420,9 @@ class TranslatorService:
         ``【条形码】`` ``[Barcode]``
         ``【盖章】``   ``[Seal]``
         ============= ===========
+
+        Also converts Chinese enumeration markers (一、二、三… → I. II. III.)
+        as a post-processing fallback for any the model missed.
 
         Parameters
         ----------
@@ -356,4 +444,9 @@ class TranslatorService:
         result = text
         for cn, en in replacements.items():
             result = result.replace(cn, en)
+
+        # Chinese enumeration fallback
+        for pattern, replacement in TranslatorService._build_cn_enum_pattern():
+            result = pattern.sub(replacement, result)
+
         return result

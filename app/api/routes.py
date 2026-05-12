@@ -5,14 +5,19 @@ import json
 import uuid
 import asyncio
 import re
+import io
+import zipfile
 from fastapi import APIRouter, UploadFile, File, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
+from openai import OpenAI
+import httpx
 
 from app.config import settings
 from app.services.glossary import GlossaryService
 from app.services.document_parser import DocumentParser
 from app.services.translator import TranslatorService
 from app.models.schemas import (
+    CustomAPIConfig,
     GlossaryUploadResponse,
     TranslateRequest,
     JobResponse,
@@ -181,14 +186,25 @@ async def translate(req: TranslateRequest):
     Returns immediately with a ``job_id`` and ``status="processing"``.
     The actual translation runs in a background ``asyncio.Task``.
     """
+    custom_api = req.custom_api.model_dump() if req.custom_api else None
     job_id = str(uuid.uuid4())
     jobs[job_id] = {
         "status": "processing",
         "file_ids": req.file_ids,
         "glossary_id": req.glossary_id,
+        "custom_api": custom_api,
+        "progress": {
+            "total": len(req.file_ids),
+            "completed": 0,
+            "current_file": None,
+            "stage": "starting",
+            "detail": "准备就绪",
+        },
     }
     _save_job(job_id, jobs[job_id])
-    asyncio.create_task(run_translation(job_id, req.file_ids, req.glossary_id))
+    asyncio.create_task(
+        run_translation(job_id, req.file_ids, req.glossary_id, custom_api=custom_api)
+    )
     return JobResponse(job_id=job_id, status="processing")
 
 
@@ -201,7 +217,9 @@ async def get_status(job_id: str):
     return {
         "job_id": job_id,
         "status": job["status"],
+        "progress": job.get("progress"),
         "results": job.get("results", []),
+        "error": job.get("error"),
     }
 
 
@@ -244,9 +262,45 @@ async def get_result(job_id: str, file_id: str | None = None):
     raise HTTPException(status_code=404, detail="No completed result files found")
 
 
+@router.get("/download-all/{job_id}")
+async def download_all(job_id: str):
+    """Download all translated files as a single ZIP archive."""
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job["status"] != "completed":
+        raise HTTPException(status_code=400, detail="Job not yet completed")
+
+    results = job.get("results", [])
+    completed = [r for r in results if r.get("status") == "completed"]
+    if not completed:
+        raise HTTPException(status_code=404, detail="No completed files found")
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for entry in completed:
+            file_path = os.path.join(UPLOAD_DIR, f"{entry['file_id']}_EN.docx")
+            if os.path.exists(file_path):
+                base_name = original_filenames.get(
+                    entry["file_id"], entry["file_id"]
+                )
+                zf.write(file_path, f"{base_name}-EN.docx")
+
+    buffer.seek(0)
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename=translations_{job_id[:8]}.zip"
+            )
+        },
+    )
+
+
 @router.get("/preview/{job_id}")
 async def preview_result(job_id: str, file_id: str | None = None):
-    """Return the translated text content for preview."""
+    """Return the translated content with run-level formatting."""
     job = jobs.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -261,14 +315,15 @@ async def preview_result(job_id: str, file_id: str | None = None):
             if os.path.exists(file_path):
                 doc = doc_parser.read_document(file_path)
                 paragraphs = doc_parser.extract_paragraphs(doc)
+                # Remove non-serialisable 'paragraph' objects from table cells
                 previews.append({
                     "file_id": entry["file_id"],
-                    "text": "\n\n".join(p["text"] for p in paragraphs),
+                    "paragraphs": paragraphs,
                 })
             else:
                 previews.append({
                     "file_id": entry["file_id"],
-                    "text": "[File not found]",
+                    "paragraphs": None,
                 })
 
     if file_id:
@@ -292,17 +347,32 @@ async def revise(req: RevisionRequest):
     new_job_id = str(uuid.uuid4())
     file_ids = original.get("file_ids", [])
     glossary_id = original.get("glossary_id", "")
+    custom_api = (
+        req.custom_api.model_dump()
+        if req.custom_api
+        else original.get("custom_api")
+    )
 
     jobs[new_job_id] = {
         "status": "processing",
         "file_ids": file_ids,
         "glossary_id": glossary_id,
+        "custom_api": custom_api,
+        "progress": {
+            "total": len(file_ids),
+            "completed": 0,
+            "current_file": None,
+            "stage": "starting",
+            "detail": "准备就绪",
+        },
     }
 
     _save_job(new_job_id, jobs[new_job_id])
 
     asyncio.create_task(
-        run_translation_with_feedback(new_job_id, file_ids, glossary_id, req.feedback)
+        run_translation_with_feedback(
+            new_job_id, file_ids, glossary_id, req.feedback, custom_api=custom_api
+        )
     )
 
     return JobResponse(job_id=new_job_id, status="processing")
@@ -320,22 +390,56 @@ async def get_glossary(glossary_id: str):
     return {"glossary_id": glossary_id, "terms": terms, **metadata}
 
 
+@router.post("/test-api")
+async def test_api(req: CustomAPIConfig):
+    """Test whether the provided API credentials work with a minimal call."""
+    try:
+        client = OpenAI(
+            api_key=req.api_key,
+            base_url=req.base_url,
+            http_client=httpx.Client(),
+        )
+        response = client.chat.completions.create(
+            model=req.model,
+            messages=[{"role": "user", "content": "Hi"}],
+            max_tokens=5,
+        )
+        if response.choices and response.choices[0].message.content:
+            return {"status": "ok", "message": "连接成功"}
+        return {"status": "error", "message": "API 返回为空"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
 # ---------------------------------------------------------------------------
 # Background translation tasks
 # ---------------------------------------------------------------------------
 
-async def _translate_paragraphs(
+def _translate_paragraphs_sync(
     paragraphs: list[dict],
     glossary: dict[str, str],
     feedback: str | None = None,
+    custom_api: dict | None = None,
+    job_id: str | None = None,
+    frac_start: float = 0.0,
+    frac_end: float = 1.0,
 ) -> list[dict]:
-    """Translate extracted paragraphs, return formatted texts with run data.
+    """Translate extracted paragraphs (sync, runs in thread).
 
-    Each returned dict mirrors the input paragraph dict but with a
-    ``translated_text`` key added.
+    Updates job progress per-paragraph within [frac_start, frac_end].
     """
+    api_kw = (
+        {
+            "api_key": custom_api["api_key"],
+            "base_url": custom_api.get("base_url"),
+            "model": custom_api.get("model"),
+        }
+        if custom_api
+        else {}
+    )
+    total = len(paragraphs)
     result = []
-    for para_data in paragraphs:
+    for idx, para_data in enumerate(paragraphs):
         text = para_data["text"]
         runs_data = para_data["runs"]
 
@@ -357,7 +461,7 @@ async def _translate_paragraphs(
                     f"[/REVISION_INSTRUCTION]\n"
                     f"Apply the above revision instruction when translating."
                 )
-            translated = translator_service.translate_text(prompt_text, glossary)
+            translated = translator_service.translate_text(prompt_text, glossary, **api_kw)
 
             # Check for Chinese residue and re-translate with stronger hint
             residue = TranslatorService.detect_chinese_residue(translated)
@@ -375,6 +479,7 @@ async def _translate_paragraphs(
                     "(no Chinese characters should remain):\n"
                     f"{retry_prompt}",
                     glossary,
+                    **api_kw,
                 )
 
         # Fix any remaining Chinese formatting labels
@@ -402,25 +507,38 @@ async def _translate_paragraphs(
 
         result.append({**para_data, "translated_text": translated})
 
+        # Update progress per paragraph
+        if job_id and job_id in jobs and total > 0:
+            p = jobs[job_id]["progress"]
+            frac = frac_start + (idx + 1) / total * (frac_end - frac_start)
+            base = int(p.get("completed", 0))
+            p["completed"] = base + min(frac, 0.99)
+
     return result
 
 
-async def _process_file(
+def _process_file_sync(
     file_id: str,
     glossary: dict[str, str],
     feedback: str | None = None,
+    custom_api: dict | None = None,
+    job_id: str | None = None,
 ) -> dict:
-    """Translate a single .docx file and write the output.
-
-    Returns a result dict with status ``"completed"`` or ``"failed"``.
-    """
+    """Translate a single .docx file (sync, runs in thread)."""
     file_path = os.path.join(UPLOAD_DIR, f"{file_id}.docx")
     translated_path = os.path.join(UPLOAD_DIR, f"{file_id}_EN.docx")
     if not os.path.exists(file_path):
         return {"file_id": file_id, "status": "failed", "error": "Source file not found"}
 
+    def _set_detail(detail: str, fraction: float | None = None) -> None:
+        if job_id and job_id in jobs:
+            p = jobs[job_id]["progress"]
+            p["detail"] = detail
+            if fraction is not None:
+                base = int(p.get("completed", 0))
+                p["completed"] = base + min(fraction, 0.99)
+
     try:
-        # --- Model-based formatting interpretation ---
         fmt_actions: list[dict] = []
         needs_retranslation = True
 
@@ -432,65 +550,17 @@ async def _process_file(
             all_texts.extend(c["text"] for c in table_cells)
 
             fmt_result = translator_service.interpret_formatting_feedback(
-                feedback, all_texts
+                feedback, all_texts, **(custom_api or {}),
             )
             fmt_actions = fmt_result.get("actions", [])
             needs_retranslation = fmt_result.get("needs_retranslation", True)
 
-        # --- Decide source: translate from Chinese or reuse translated doc ---
         if needs_retranslation:
+            _set_detail("正在解析文档结构...", 0.05)
             doc = doc_parser.read_document(file_path)
             paragraphs = doc_parser.extract_paragraphs(doc)
-            translated = await _translate_paragraphs(paragraphs, glossary, feedback)
-
-            for idx, entry in enumerate(translated):
-                if idx < len(doc.paragraphs):
-                    doc_parser.apply_formatting(
-                        doc.paragraphs[idx],
-                        entry["runs"],
-                        entry["translated_text"],
-                    )
-                    doc_parser.set_line_spacing(doc.paragraphs[idx], True)
-
-            # Translate table cells
-            table_cells = doc_parser.extract_table_cells(doc)
-            if table_cells:
-                translated_cells = await _translate_paragraphs(
-                    table_cells, glossary, feedback
-                )
-                for entry in translated_cells:
-                    doc_parser.apply_formatting(
-                        entry["paragraph"],
-                        entry["runs"],
-                        entry["translated_text"],
-                    )
-                    doc_parser.set_line_spacing(entry["paragraph"], False)
-
-            # Translate text boxes
-            textbox_paras = doc_parser.extract_textbox_paragraphs(doc)
-            if textbox_paras:
-                translated_tb = await _translate_paragraphs(
-                    textbox_paras, glossary, feedback
-                )
-                for entry in translated_tb:
-                    doc_parser.apply_textbox_formatting(
-                        entry["element"],
-                        entry["runs"],
-                        entry["translated_text"],
-                    )
-                    doc_parser.set_textbox_line_spacing(entry["element"])
-
-            doc_parser.clear_background_shading(doc)
-
-        elif os.path.exists(translated_path):
-            # Formatting-only revision: read already-translated doc
-            doc = doc_parser.read_document(translated_path)
-
-        else:
-            # First translation: no translated doc yet, translate now
-            doc = doc_parser.read_document(file_path)
-            paragraphs = doc_parser.extract_paragraphs(doc)
-            translated = await _translate_paragraphs(paragraphs, glossary, feedback)
+            _set_detail("正在翻译正文段落...", 0.3)
+            translated = _translate_paragraphs_sync(paragraphs, glossary, feedback, custom_api, job_id, 0.3, 0.6)
 
             for idx, entry in enumerate(translated):
                 if idx < len(doc.paragraphs):
@@ -499,33 +569,69 @@ async def _process_file(
 
             table_cells = doc_parser.extract_table_cells(doc)
             if table_cells:
-                translated_cells = await _translate_paragraphs(table_cells, glossary, feedback)
+                _set_detail("正在翻译表格内容...", 0.6)
+                translated_cells = _translate_paragraphs_sync(table_cells, glossary, feedback, None, job_id, 0.6, 0.8)
                 for entry in translated_cells:
                     doc_parser.apply_formatting(entry["paragraph"], entry["runs"], entry["translated_text"])
                     doc_parser.set_line_spacing(entry["paragraph"], False)
 
             textbox_paras = doc_parser.extract_textbox_paragraphs(doc)
             if textbox_paras:
-                translated_tb = await _translate_paragraphs(textbox_paras, glossary, feedback)
+                _set_detail("正在翻译文本框...", 0.8)
+                translated_tb = _translate_paragraphs_sync(textbox_paras, glossary, feedback, None, job_id, 0.8, 0.9)
                 for entry in translated_tb:
                     doc_parser.apply_textbox_formatting(entry["element"], entry["runs"], entry["translated_text"])
                     doc_parser.set_textbox_line_spacing(entry["element"])
 
+            _set_detail("正在清理背景色...", 0.9)
             doc_parser.clear_background_shading(doc)
 
-        # --- Apply targeted formatting ---
+        elif os.path.exists(translated_path):
+            doc = doc_parser.read_document(translated_path)
+        else:
+            _set_detail("正在解析文档结构...", 0.05)
+            doc = doc_parser.read_document(file_path)
+            paragraphs = doc_parser.extract_paragraphs(doc)
+            _set_detail("正在翻译正文段落...", 0.3)
+            translated = _translate_paragraphs_sync(paragraphs, glossary, feedback, custom_api, job_id, 0.3, 0.6)
+
+            for idx, entry in enumerate(translated):
+                if idx < len(doc.paragraphs):
+                    doc_parser.apply_formatting(doc.paragraphs[idx], entry["runs"], entry["translated_text"])
+                    doc_parser.set_line_spacing(doc.paragraphs[idx], True)
+
+            table_cells = doc_parser.extract_table_cells(doc)
+            if table_cells:
+                _set_detail("正在翻译表格内容...", 0.6)
+                translated_cells = _translate_paragraphs_sync(table_cells, glossary, feedback, None, job_id, 0.6, 0.8)
+                for entry in translated_cells:
+                    doc_parser.apply_formatting(entry["paragraph"], entry["runs"], entry["translated_text"])
+                    doc_parser.set_line_spacing(entry["paragraph"], False)
+
+            textbox_paras = doc_parser.extract_textbox_paragraphs(doc)
+            if textbox_paras:
+                _set_detail("正在翻译文本框...", 0.8)
+                translated_tb = _translate_paragraphs_sync(textbox_paras, glossary, feedback, custom_api, job_id, 0.8, 0.9)
+                for entry in translated_tb:
+                    doc_parser.apply_textbox_formatting(entry["element"], entry["runs"], entry["translated_text"])
+                    doc_parser.set_textbox_line_spacing(entry["element"])
+
+            _set_detail("正在清理背景色...", 0.9)
+            doc_parser.clear_background_shading(doc)
+
         applied: list[str] = []
         if fmt_actions:
+            _set_detail("正在应用格式调整...", 0.93)
             applied = doc_parser.apply_targeted_formatting(doc, fmt_actions)
         elif feedback:
+            _set_detail("正在应用格式调整...", 0.93)
             applied = doc_parser.apply_formatting_instructions(doc, feedback)
 
+        _set_detail("正在保存文件...", 0.98)
         output_path = translated_path
         doc_parser.save_document(doc, output_path)
 
-        # Post-translation quality check
         cn_warnings = doc_parser.verify_no_cn(output_path)
-
         result = {"file_id": file_id, "status": "completed"}
         if cn_warnings:
             result["cn_warnings"] = cn_warnings
@@ -537,7 +643,10 @@ async def _process_file(
 
 
 async def run_translation(
-    job_id: str, file_ids: list[str], glossary_id: str
+    job_id: str,
+    file_ids: list[str],
+    glossary_id: str,
+    custom_api: dict | None = None,
 ) -> None:
     """Background task: translate all files in a job."""
     try:
@@ -548,18 +657,47 @@ async def run_translation(
         _save_job(job_id, jobs[job_id])
         return
 
+    total = len(file_ids)
+    # Preserve any existing progress fields (e.g. detail set at job creation)
+    cur = jobs[job_id].get("progress", {})
+    cur.update(total=total, completed=0, current_file=None, stage="starting", detail=cur.get("detail", "准备就绪"))
+    jobs[job_id]["progress"] = cur
+    _save_job(job_id, jobs[job_id])
+
+    loop = asyncio.get_event_loop()
     results = []
-    for file_id in file_ids:
-        result = await _process_file(file_id, glossary)
+    for i, file_id in enumerate(file_ids):
+        fname = original_filenames.get(file_id, file_id)
+        jobs[job_id]["progress"].update(
+            completed=i,
+            current_file=fname,
+            stage="translating",
+            detail="正在解析文档...",
+        )
+        _save_job(job_id, jobs[job_id])
+
+        result = await loop.run_in_executor(
+            None, _process_file_sync, file_id, glossary, None, custom_api, job_id
+        )
         results.append(result)
 
+    jobs[job_id]["progress"].update(
+        completed=total,
+        current_file=None,
+        stage="done",
+        detail="全部翻译完成",
+    )
     jobs[job_id]["status"] = "completed"
     jobs[job_id]["results"] = results
     _save_job(job_id, jobs[job_id])
 
 
 async def run_translation_with_feedback(
-    job_id: str, file_ids: list[str], glossary_id: str, feedback: str
+    job_id: str,
+    file_ids: list[str],
+    glossary_id: str,
+    feedback: str,
+    custom_api: dict | None = None,
 ) -> None:
     """Background task: re-translate all files with user feedback."""
     try:
@@ -570,11 +708,35 @@ async def run_translation_with_feedback(
         _save_job(job_id, jobs[job_id])
         return
 
+    total = len(file_ids)
+    cur = jobs[job_id].get("progress", {})
+    cur.update(total=total, completed=0, current_file=None, stage="starting", detail=cur.get("detail", "准备就绪"))
+    jobs[job_id]["progress"] = cur
+    _save_job(job_id, jobs[job_id])
+
+    loop = asyncio.get_event_loop()
     results = []
-    for file_id in file_ids:
-        result = await _process_file(file_id, glossary, feedback=feedback)
+    for i, file_id in enumerate(file_ids):
+        fname = original_filenames.get(file_id, file_id)
+        jobs[job_id]["progress"].update(
+            completed=i,
+            current_file=fname,
+            stage="translating",
+            detail="正在解析文档...",
+        )
+        _save_job(job_id, jobs[job_id])
+
+        result = await loop.run_in_executor(
+            None, _process_file_sync, file_id, glossary, feedback, custom_api, job_id
+        )
         results.append(result)
 
+    jobs[job_id]["progress"].update(
+        completed=total,
+        current_file=None,
+        stage="done",
+        detail="全部翻译完成",
+    )
     jobs[job_id]["status"] = "completed"
     jobs[job_id]["results"] = results
     _save_job(job_id, jobs[job_id])
