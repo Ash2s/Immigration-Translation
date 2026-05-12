@@ -90,7 +90,10 @@ class TranslatorService:
         self._client = OpenAI(
             api_key=settings.DEEPSEEK_API_KEY,
             base_url="https://api.deepseek.com",
-            http_client=httpx.Client(),
+            http_client=httpx.Client(
+                transport=httpx.HTTPTransport(),
+                timeout=httpx.Timeout(60.0, connect=10.0),
+            ),
         )
         self._model = settings.DEEPSEEK_MODEL
 
@@ -154,14 +157,15 @@ class TranslatorService:
         api_key: str | None = None,
         base_url: str | None = None,
     ) -> OpenAI:
-        """Create an OpenAI client, optionally with custom credentials."""
-        if api_key:
-            return OpenAI(
-                api_key=api_key,
-                base_url=base_url or "https://api.deepseek.com",
-                http_client=httpx.Client(),
-            )
-        return self._client
+        """Create an OpenAI client (always fresh for thread safety)."""
+        return OpenAI(
+            api_key=api_key or settings.DEEPSEEK_API_KEY,
+            base_url=base_url or "https://api.deepseek.com",
+            http_client=httpx.Client(
+                transport=httpx.HTTPTransport(),
+                timeout=httpx.Timeout(60.0, connect=10.0),
+            ),
+        )
 
     def translate_text(
         self,
@@ -216,6 +220,8 @@ class TranslatorService:
                 "Use the provided glossary for technical terms:\n"
                 f"{glossary_lines}\n\n"
                 "Preserve formatting markers such as (Seal), (Signature), [Image], [Barcode].\n"
+                "Convert Chinese numbered lists (一、二、三… / 第一、第二、第三… / 1、2、3… / (一)(二)…) "
+                "to English format (I. II. III. / 1. 2. 3. / (1) (2)…).\n"
                 "Use Times New Roman style, formal tone, and double line spacing.\n"
                 "Output only the translated text, no explanations."
             )
@@ -354,6 +360,55 @@ class TranslatorService:
         return {"needs_retranslation": False, "actions": []}
 
     @staticmethod
+    def _cn_numeral(n: int) -> str:
+        """Return Chinese numeral *n* (1-10) as the character."""
+        return ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'][n - 1]
+
+    @staticmethod
+    def _roman_numeral(n: int) -> str:
+        """Return Roman numeral for *n* (1-10)."""
+        return ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'][n - 1]
+
+    @staticmethod
+    def _build_cn_enum_pattern() -> list[tuple[re.Pattern, str]]:
+        """Build regex patterns for Chinese enumeration markers.
+
+        Returns a list of ``(compiled_regex, replacement_template)`` tuples.
+        """
+        patterns = []
+        for i in range(1, 11):
+            cn = TranslatorService._cn_numeral(i)
+            roman = TranslatorService._roman_numeral(i)
+            # Line-start: "一、" → "I."
+            patterns.append((
+                re.compile(rf'(?<![^\s]){re.escape(cn)}、'),
+                f'{roman}.',
+            ))
+            # Ordinal prefix: "第一、" → "I."
+            patterns.append((
+                re.compile(rf'(?<![^\s])第{re.escape(cn)}、'),
+                f'{roman}.',
+            ))
+            # Parenthesized halfwidth: "(一)" → "(I)"
+            patterns.append((
+                re.compile(rf'\(({re.escape(cn)})\)'),
+                rf'({roman})',
+            ))
+            # Parenthesized fullwidth: "（一）" → "(I)"
+            patterns.append((
+                re.compile(rf'（{re.escape(cn)}）'),
+                rf'({roman})',
+            ))
+
+        # Arabic numeral with Chinese enumeration comma: "1、" → "1."
+        for i in range(0, 10):
+            patterns.append((
+                re.compile(rf'(?<![^\s]){i}、'),
+                f'{i}.',
+            ))
+        return patterns
+
+    @staticmethod
     def fix_cn_labels(text: str) -> str:
         """
         Replace common Chinese formatting labels with their English equivalents.
@@ -365,6 +420,9 @@ class TranslatorService:
         ``【条形码】`` ``[Barcode]``
         ``【盖章】``   ``[Seal]``
         ============= ===========
+
+        Also converts Chinese enumeration markers (一、二、三… → I. II. III.)
+        as a post-processing fallback for any the model missed.
 
         Parameters
         ----------
@@ -386,4 +444,9 @@ class TranslatorService:
         result = text
         for cn, en in replacements.items():
             result = result.replace(cn, en)
+
+        # Chinese enumeration fallback
+        for pattern, replacement in TranslatorService._build_cn_enum_pattern():
+            result = pattern.sub(replacement, result)
+
         return result
