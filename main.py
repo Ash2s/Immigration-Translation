@@ -1,11 +1,21 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 from app.api import routes
 import os
 from pathlib import Path
 
 app = FastAPI(title="Immigration Translation Tool")
+
+# Allow cross-origin requests (e.g. from Open Design preview)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(routes.router, prefix="/api")
 
