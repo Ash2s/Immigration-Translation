@@ -210,54 +210,76 @@ class DocumentParser:
         runs_data: list[dict],
         text: str,
     ) -> None:
-        """
-        Replace the content of *para* with *text* while:
-          - Setting the font to Times New Roman 12pt
-          - Preserving the original paragraph alignment
-          - Applying any **bold** / *italic* / underline / highlight / color
-            that existed in the original runs (union across all runs).
-
-        Parameters
-        ----------
-        para :
-            A python-docx ``Paragraph`` object (from the same document
-            that ``extract_paragraphs`` was called on).
-        runs_data : list[dict]
-            The list of run dicts returned by ``extract_paragraphs`` for
-            this paragraph.
-        text : str
-            The translated text to place in the paragraph.
-        """
-        # 1. Find all run elements at the XML level.  We must NOT remove
-        #    run elements because some of them may contain drawings or text
-        #    boxes (``w:txbxContent``).  Instead we clear every ``<w:t>``
-        #    child and add one new ``<w:t>`` to the first run.
+        """Legacy method: collapse all runs, put *text* in the first run,
+        and apply formatting union (bold/italic only).
+        Prefer ``apply_per_run_formatting`` for new code."""
         w_r_els = para._p.findall(qn('w:r'))
 
         if w_r_els:
-            # Strip all w:t children from every run (preserving non-text
-            # children such as <w:drawing>, <w:pict>, etc.)
             for r_elem in w_r_els:
                 for t_elem in r_elem.findall(qn('w:t')):
                     r_elem.remove(t_elem)
-
-            # Add a single w:t to the first run with the translated text.
             first_t = OxmlElement('w:t')
             first_t.set(qn('xml:space'), 'preserve')
             first_t.text = text
             w_r_els[0].append(first_t)
 
-            # Apply fonts & formatting on the first run via python-docx API.
             run = para.runs[0]
             run.font.name = "Times New Roman"
             run.font.size = Pt(12)
             self._apply_run_formatting(run, runs_data)
         else:
-            # No runs at all – add a new one.
             new_run = para.add_run(text)
             new_run.font.name = "Times New Roman"
             new_run.font.size = Pt(12)
             self._apply_run_formatting(new_run, runs_data)
+
+    def apply_per_run_formatting(
+        self,
+        para,
+        runs_data: list[dict],
+        translated_runs: list[str],
+    ) -> None:
+        """
+        Replace each run's text with its per-run translation while preserving
+        the run's ORIGINAL formatting (highlight, underline, color, bold,
+        italic) that was already stored in ``<w:rPr>`` at extraction time.
+
+        The only forced change is font → Times New Roman 12pt and line
+        spacing.  Background shading is cleared separately via
+        ``clear_background_shading``.
+        """
+        w_r_els = para._p.findall(qn('w:r'))
+
+        for r_idx, rd in enumerate(runs_data):
+            original_text = rd.get("text", "")
+            if not original_text.strip():
+                continue  # this run was empty in the original – skip
+
+            if r_idx >= len(w_r_els) or r_idx >= len(translated_runs):
+                continue  # safety guard
+
+            r_elem = w_r_els[r_idx]
+
+            # Clear existing <w:t> children
+            for t_elem in r_elem.findall(qn('w:t')):
+                r_elem.remove(t_elem)
+
+            # Add new <w:t> with translated text
+            new_t = OxmlElement('w:t')
+            new_t.set(qn('xml:space'), 'preserve')
+            new_t.text = translated_runs[r_idx]
+            r_elem.append(new_t)
+
+        # Force Times New Roman 12pt on runs that received text
+        # (this modifies <w:rPr> in-place without removing other formatting)
+        for r_idx, rd in enumerate(runs_data):
+            if not rd.get("text", "").strip():
+                continue
+            if r_idx < len(para.runs):
+                run = para.runs[r_idx]
+                run.font.name = "Times New Roman"
+                run.font.size = Pt(12)
 
     def clear_background_shading(self, doc: DocxDocument) -> None:
         """
@@ -468,8 +490,13 @@ class DocumentParser:
         """
         font = run.font
         highlight = None
-        if font.highlight_color is not None:
-            highlight = font.highlight_color.value  # e.g. 7 for YELLOW
+        try:
+            if font.highlight_color is not None:
+                raw = font.highlight_color.value
+                if raw is not None and raw != 'none':
+                    highlight = raw
+        except Exception:
+            pass
 
         color = None
         if font.color is not None and font.color.rgb is not None:
@@ -493,50 +520,22 @@ class DocumentParser:
     @staticmethod
     def _apply_run_formatting(run, runs_data: list[dict]) -> None:
         """
-        Inspect the union of formatting across all *runs_data* entries and
-        apply the active properties to *run*.
+        Apply formatting to *run* based on the original run data.
 
-        - **bold**: True if ANY original run was bold.
-        - *italic*: True if ANY original run was italic.
-        - underline: True if ANY original run was underlined.
-        - highlight: taken from the first run that carried one.
-        - color: taken from the first run that carried one.
+        - **bold** / *italic*: applied if ANY original run had it (safe for
+          paragraph-level semantics like headings).
+        - **underline** / **highlight** / **color**: NOT propagated via union
+          because these are almost always applied to specific words/phrases
+          within a paragraph, not the entire paragraph.  Propagating them would
+          incorrectly highlight/color/underline the full translated text.
         """
-        # Determine which properties are "active" across all runs.
         has_bold = any(rd.get("bold") for rd in runs_data)
         has_italic = any(rd.get("italic") for rd in runs_data)
-        has_underline = any(rd.get("underline") for rd in runs_data)
-        has_highlight = any(
-            rd.get("highlight") is not None for rd in runs_data
-        )
-        has_color = any(rd.get("color") is not None for rd in runs_data)
 
         if has_bold:
             run.font.bold = True
         if has_italic:
             run.font.italic = True
-        if has_underline:
-            run.font.underline = True
-
-        if has_highlight:
-            for rd in runs_data:
-                h = rd.get("highlight")
-                if h is not None:
-                    try:
-                        run.font.highlight_color = WD_COLOR_INDEX(h)
-                    except (ValueError, KeyError):
-                        pass
-                    break
-
-        if has_color:
-            for rd in runs_data:
-                c = rd.get("color")
-                if c is not None:
-                    try:
-                        run.font.color.rgb = RGBColor.from_string(c)
-                    except (ValueError, AttributeError):
-                        pass
-                    break
 
     @staticmethod
     def _clear_shading_from_element(element, container_tag: str) -> None:

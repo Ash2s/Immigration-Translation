@@ -426,6 +426,10 @@ def _translate_paragraphs_sync(
 ) -> list[dict]:
     """Translate extracted paragraphs (sync, runs in thread).
 
+    Each paragraph result includes both a ``translated_text`` (full paragraph)
+    and ``translated_runs`` (per-run list) so that downstream formatting can
+    preserve per-run formatting (highlight, underline, colour, etc.).
+
     Updates job progress per-paragraph within [frac_start, frac_end].
     """
     api_kw = (
@@ -444,68 +448,110 @@ def _translate_paragraphs_sync(
         runs_data = para_data["runs"]
 
         if not text.strip():
-            result.append({**para_data, "translated_text": text})
+            result.append({
+                **para_data,
+                "translated_text": text,
+                "translated_runs": [rd["text"] for rd in runs_data],
+            })
             continue
 
-        # Term-only heuristic: short text without Chinese characters/punctuation
+        # ── 1. Translate full paragraph (for quality / fallback) ──
         if len(text) < 100 and not _CN_PUNCT_RE.search(text):
             translated = translator_service.replace_with_glossary(text, glossary)
         else:
-            # Build prompt text, optionally including revision feedback
-            prompt_text = text
+            prompt = text
             if feedback:
-                prompt_text = (
+                prompt = (
                     f"{text}\n\n"
-                    f"[REVISION_INSTRUCTION]\n"
-                    f"{feedback}\n"
-                    f"[/REVISION_INSTRUCTION]\n"
+                    f"[REVISION_INSTRUCTION]\n{feedback}\n[/REVISION_INSTRUCTION]\n"
                     f"Apply the above revision instruction when translating."
                 )
-            translated = translator_service.translate_text(prompt_text, glossary, **api_kw)
+            translated = translator_service.translate_text(prompt, glossary, **api_kw)
 
-            # Check for Chinese residue and re-translate with stronger hint
             residue = TranslatorService.detect_chinese_residue(translated)
             if residue:
-                retry_prompt = text
+                retry = text
                 if feedback:
-                    retry_prompt = (
-                        f"{text}\n\n"
-                        f"[REVISION_INSTRUCTION]\n"
-                        f"{feedback}\n"
-                        f"[/REVISION_INSTRUCTION]"
-                    )
+                    retry = f"{text}\n\n[REVISION_INSTRUCTION]\n{feedback}\n[/REVISION_INSTRUCTION]"
                 translated = translator_service.translate_text(
                     "Please fully translate the following Chinese to English "
-                    "(no Chinese characters should remain):\n"
-                    f"{retry_prompt}",
-                    glossary,
-                    **api_kw,
+                    "(no Chinese characters should remain):\n" + retry,
+                    glossary, **api_kw,
                 )
 
-        # Fix any remaining Chinese formatting labels
         translated = TranslatorService.fix_cn_labels(translated)
-
-        # Strip any revision instruction residue the model preserved
         translated = re.sub(
             r'\s*\[/?REVISION_INSTRUCTION\].*?\[/REVISION_INSTRUCTION\]\s*',
-            '',
-            translated,
-            flags=re.DOTALL,
+            '', translated, flags=re.DOTALL,
         ).strip()
         translated = re.sub(
             r'\s*\[/?REVISION_INSTRUCTION\].*',
-            '',
-            translated,
-            flags=re.DOTALL,
+            '', translated, flags=re.DOTALL,
         ).strip()
-
-        # Strip markdown bold/italic markers (**text**) that the model
-        # sometimes adds — formatting is applied via run-level properties.
         translated = re.sub(r'\*\*\*(.+?)\*\*\*', r'\1', translated, flags=re.DOTALL)
         translated = re.sub(r'\*\*(.+?)\*\*', r'\1', translated, flags=re.DOTALL)
         translated = re.sub(r'\*(.+?)\*', r'\1', translated, flags=re.DOTALL)
 
-        result.append({**para_data, "translated_text": translated})
+        # ── 2. Translate each non-empty run (preserve per-run formatting) ──
+        translated_runs: list[str] = []
+        for rd in runs_data:
+            run_text = rd["text"]
+            if not run_text.strip():
+                translated_runs.append(run_text)
+                continue
+
+            # Term-only heuristic for short runs
+            if len(run_text) < 100 and not _CN_PUNCT_RE.search(run_text):
+                rt = translator_service.replace_with_glossary(run_text, glossary)
+            else:
+                # Provide full paragraph as context for per-run translation
+                ctx_prompt = (
+                    f"Full paragraph context (do NOT translate this):\n{text}\n\n"
+                    f"Now translate ONLY the following segment from that paragraph:\n{run_text}"
+                )
+                if feedback:
+                    ctx_prompt += (
+                        f"\n\n[REVISION_INSTRUCTION]\n{feedback}\n[/REVISION_INSTRUCTION]\n"
+                        f"Apply the revision instruction."
+                    )
+                rt = translator_service.translate_text(ctx_prompt, glossary, **api_kw)
+
+                residue = TranslatorService.detect_chinese_residue(rt)
+                if residue:
+                    retry_run = (
+                        f"Full paragraph context:\n{text}\n\n"
+                        f"Translate ONLY this segment and output ONLY English:\n{run_text}"
+                    )
+                    if feedback:
+                        retry_run += (
+                            f"\n\n[REVISION_INSTRUCTION]\n{feedback}\n[/REVISION_INSTRUCTION]"
+                        )
+                    rt = translator_service.translate_text(
+                        "Please fully translate the following Chinese to English "
+                        "(no Chinese characters should remain):\n" + retry_run,
+                        glossary, **api_kw,
+                    )
+
+            rt = TranslatorService.fix_cn_labels(rt)
+            rt = re.sub(r'\*\*\*(.+?)\*\*\*', r'\1', rt, flags=re.DOTALL)
+            rt = re.sub(r'\*\*(.+?)\*\*', r'\1', rt, flags=re.DOTALL)
+            rt = re.sub(r'\*(.+?)\*', r'\1', rt, flags=re.DOTALL)
+            # Clean revision instruction residue from run translation
+            rt = re.sub(
+                r'\s*\[/?REVISION_INSTRUCTION\].*?\[/REVISION_INSTRUCTION\]\s*',
+                '', rt, flags=re.DOTALL,
+            ).strip()
+            rt = re.sub(
+                r'\s*\[/?REVISION_INSTRUCTION\].*',
+                '', rt, flags=re.DOTALL,
+            ).strip()
+            translated_runs.append(rt)
+
+        result.append({
+            **para_data,
+            "translated_text": translated,
+            "translated_runs": translated_runs,
+        })
 
         # Update progress per paragraph
         if job_id and job_id in jobs and total > 0:
@@ -564,7 +610,7 @@ def _process_file_sync(
 
             for idx, entry in enumerate(translated):
                 if idx < len(doc.paragraphs):
-                    doc_parser.apply_formatting(doc.paragraphs[idx], entry["runs"], entry["translated_text"])
+                    doc_parser.apply_per_run_formatting(doc.paragraphs[idx], entry["runs"], entry.get("translated_runs", []))
                     doc_parser.set_line_spacing(doc.paragraphs[idx], True)
 
             table_cells = doc_parser.extract_table_cells(doc)
@@ -572,7 +618,7 @@ def _process_file_sync(
                 _set_detail("正在翻译表格内容...", 0.6)
                 translated_cells = _translate_paragraphs_sync(table_cells, glossary, feedback, None, job_id, 0.6, 0.8)
                 for entry in translated_cells:
-                    doc_parser.apply_formatting(entry["paragraph"], entry["runs"], entry["translated_text"])
+                    doc_parser.apply_per_run_formatting(entry["paragraph"], entry["runs"], entry.get("translated_runs", []))
                     doc_parser.set_line_spacing(entry["paragraph"], False)
 
             textbox_paras = doc_parser.extract_textbox_paragraphs(doc)
@@ -597,7 +643,7 @@ def _process_file_sync(
 
             for idx, entry in enumerate(translated):
                 if idx < len(doc.paragraphs):
-                    doc_parser.apply_formatting(doc.paragraphs[idx], entry["runs"], entry["translated_text"])
+                    doc_parser.apply_per_run_formatting(doc.paragraphs[idx], entry["runs"], entry.get("translated_runs", []))
                     doc_parser.set_line_spacing(doc.paragraphs[idx], True)
 
             table_cells = doc_parser.extract_table_cells(doc)
@@ -605,7 +651,7 @@ def _process_file_sync(
                 _set_detail("正在翻译表格内容...", 0.6)
                 translated_cells = _translate_paragraphs_sync(table_cells, glossary, feedback, None, job_id, 0.6, 0.8)
                 for entry in translated_cells:
-                    doc_parser.apply_formatting(entry["paragraph"], entry["runs"], entry["translated_text"])
+                    doc_parser.apply_per_run_formatting(entry["paragraph"], entry["runs"], entry.get("translated_runs", []))
                     doc_parser.set_line_spacing(entry["paragraph"], False)
 
             textbox_paras = doc_parser.extract_textbox_paragraphs(doc)
