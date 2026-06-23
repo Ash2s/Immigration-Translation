@@ -140,3 +140,32 @@ def test_output_format_times_new_roman():
         assert para.runs[0].font.bold is True
     finally:
         os.unlink(path)
+
+
+def test_apply_per_run_formatting_adds_space_between_runs():
+    """When per-run translations would merge without spaces (e.g. Chinese
+    character fragments translated independently), apply_per_run_formatting
+    should insert a space between adjacent alphanumeric runs."""
+    parser = DocumentParser()
+    doc = DocxDocument()
+    p = doc.add_paragraph()
+
+    # Simulate two runs that were originally Chinese characters "例" "如"
+    r1 = p.add_run("Example")
+    r2 = p.add_run("For example")
+
+    runs_data = [
+        {"text": "例", "bold": False, "italic": False, "underline": False,
+         "font_name": None, "font_size": None, "highlight": None, "color": None},
+        {"text": "如", "bold": False, "italic": False, "underline": False,
+         "font_name": None, "font_size": None, "highlight": None, "color": None},
+    ]
+    translated_runs = ["Example", "For example"]
+
+    parser.apply_per_run_formatting(p, runs_data, translated_runs)
+
+    # The two runs should now have a space between them
+    assert p.text == "Example For example", (
+        f"Expected 'Example For example', got: {repr(p.text)}"
+    )
+

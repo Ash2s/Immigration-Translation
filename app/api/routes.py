@@ -492,60 +492,105 @@ def _translate_paragraphs_sync(
         translated = re.sub(r'\*\*(.+?)\*\*', r'\1', translated, flags=re.DOTALL)
         translated = re.sub(r'\*(.+?)\*', r'\1', translated, flags=re.DOTALL)
 
+        # Always clean mechanical errors (spacing, duplicated words) for ALL paths
+        translated = translator_service._clean_mechanical_errors(translated)
+
+        # ── 1b. Polish / proofread the translated English (quality pass) ──
+        # Only polish text that went through the API (not glossary replacement)
+        # and is long enough to benefit from editing.
+        went_through_api = not (len(text) < 100 and not _CN_PUNCT_RE.search(text))
+        text_was_polished = False
+        if went_through_api and len(translated) > 30:
+            polished = translator_service.polish_text(translated, **api_kw)
+            if polished and polished != translated:
+                translated = polished
+                text_was_polished = True
+
         # ── 2. Translate each non-empty run (preserve per-run formatting) ──
+        # First, detect whether runs are Chinese-character fragments (e.g. a
+        # word like "例如" split across runs as "例" + "如").  When runs are
+        # very short (average ≤ 2 Chinese chars), or when the full text was
+        # polished, per-run translation would produce text inconsistent with
+        # the polished full text — skip it and put the full translation in
+        # the first run instead.
+        non_empty_runs = [rd for rd in runs_data if rd.get("text", "").strip()]
+        avg_run_len = (
+            sum(len(rd["text"]) for rd in non_empty_runs) / len(non_empty_runs)
+            if non_empty_runs else 0
+        )
+        runs_are_fragments = (
+            len(non_empty_runs) > 1 and (avg_run_len <= 2.5 or text_was_polished)
+        )
+
         translated_runs: list[str] = []
-        for rd in runs_data:
-            run_text = rd["text"]
-            if not run_text.strip():
-                translated_runs.append(run_text)
-                continue
+        if runs_are_fragments:
+            # Put full paragraph translation in the first non-empty run,
+            # empty in the rest (formatting union applied separately).
+            first_done = False
+            for rd in runs_data:
+                if rd.get("text", "").strip():
+                    if not first_done:
+                        translated_runs.append(translated)
+                        first_done = True
+                    else:
+                        translated_runs.append("")
+                else:
+                    translated_runs.append(rd.get("text", ""))
+        else:
+            for rd in runs_data:
+                run_text = rd["text"]
+                if not run_text.strip():
+                    translated_runs.append(run_text)
+                    continue
 
-            # Term-only heuristic for short runs
-            if len(run_text) < 100 and not _CN_PUNCT_RE.search(run_text):
-                rt = translator_service.replace_with_glossary(run_text, glossary)
-            else:
-                # Provide full paragraph as context for per-run translation
-                ctx_prompt = (
-                    f"Full paragraph context (do NOT translate this):\n{text}\n\n"
-                    f"Now translate ONLY the following segment from that paragraph:\n{run_text}"
-                )
-                if feedback:
-                    ctx_prompt += (
-                        f"\n\n[REVISION_INSTRUCTION]\n{feedback}\n[/REVISION_INSTRUCTION]\n"
-                        f"Apply the revision instruction."
-                    )
-                rt = translator_service.translate_text(ctx_prompt, glossary, **api_kw)
-
-                residue = TranslatorService.detect_chinese_residue(rt)
-                if residue:
-                    retry_run = (
-                        f"Full paragraph context:\n{text}\n\n"
-                        f"Translate ONLY this segment and output ONLY English:\n{run_text}"
+                # Term-only heuristic for short runs
+                if len(run_text) < 100 and not _CN_PUNCT_RE.search(run_text):
+                    rt = translator_service.replace_with_glossary(run_text, glossary)
+                else:
+                    # Provide full paragraph as context for per-run translation
+                    ctx_prompt = (
+                        f"Full paragraph context (do NOT translate this):\n{text}\n\n"
+                        f"Now translate ONLY the following segment from that paragraph:\n{run_text}"
                     )
                     if feedback:
-                        retry_run += (
-                            f"\n\n[REVISION_INSTRUCTION]\n{feedback}\n[/REVISION_INSTRUCTION]"
+                        ctx_prompt += (
+                            f"\n\n[REVISION_INSTRUCTION]\n{feedback}\n[/REVISION_INSTRUCTION]\n"
+                            f"Apply the revision instruction."
                         )
-                    rt = translator_service.translate_text(
-                        "Please fully translate the following Chinese to English "
-                        "(no Chinese characters should remain):\n" + retry_run,
-                        glossary, **api_kw,
-                    )
+                    rt = translator_service.translate_text(ctx_prompt, glossary, **api_kw)
 
-            rt = TranslatorService.fix_cn_labels(rt)
-            rt = re.sub(r'\*\*\*(.+?)\*\*\*', r'\1', rt, flags=re.DOTALL)
-            rt = re.sub(r'\*\*(.+?)\*\*', r'\1', rt, flags=re.DOTALL)
-            rt = re.sub(r'\*(.+?)\*', r'\1', rt, flags=re.DOTALL)
-            # Clean revision instruction residue from run translation
-            rt = re.sub(
-                r'\s*\[/?REVISION_INSTRUCTION\].*?\[/REVISION_INSTRUCTION\]\s*',
-                '', rt, flags=re.DOTALL,
-            ).strip()
-            rt = re.sub(
-                r'\s*\[/?REVISION_INSTRUCTION\].*',
-                '', rt, flags=re.DOTALL,
-            ).strip()
-            translated_runs.append(rt)
+                    residue = TranslatorService.detect_chinese_residue(rt)
+                    if residue:
+                        retry_run = (
+                            f"Full paragraph context:\n{text}\n\n"
+                            f"Translate ONLY this segment and output ONLY English:\n{run_text}"
+                        )
+                        if feedback:
+                            retry_run += (
+                                f"\n\n[REVISION_INSTRUCTION]\n{feedback}\n[/REVISION_INSTRUCTION]"
+                            )
+                        rt = translator_service.translate_text(
+                            "Please fully translate the following Chinese to English "
+                            "(no Chinese characters should remain):\n" + retry_run,
+                            glossary, **api_kw,
+                        )
+
+                rt = TranslatorService.fix_cn_labels(rt)
+                rt = re.sub(r'\*\*\*(.+?)\*\*\*', r'\1', rt, flags=re.DOTALL)
+                rt = re.sub(r'\*\*(.+?)\*\*', r'\1', rt, flags=re.DOTALL)
+                rt = re.sub(r'\*(.+?)\*', r'\1', rt, flags=re.DOTALL)
+                # Clean mechanical errors on per-run text too
+                rt = translator_service._clean_mechanical_errors(rt)
+                # Clean revision instruction residue from run translation
+                rt = re.sub(
+                    r'\s*\[/?REVISION_INSTRUCTION\].*?\[/REVISION_INSTRUCTION\]\s*',
+                    '', rt, flags=re.DOTALL,
+                ).strip()
+                rt = re.sub(
+                    r'\s*\[/?REVISION_INSTRUCTION\].*',
+                    '', rt, flags=re.DOTALL,
+                ).strip()
+                translated_runs.append(rt)
 
         result.append({
             **para_data,

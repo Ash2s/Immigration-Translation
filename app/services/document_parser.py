@@ -248,6 +248,13 @@ class DocumentParser:
         The only forced change is font → Times New Roman 12pt and line
         spacing.  Background shading is cleared separately via
         ``clear_background_shading``.
+
+        After replacing text, inter-run spacing is normalized: if two
+        adjacent runs would merge into a single word (no space between them
+        where one is needed), a space is inserted.  This handles cases where
+        a Chinese word split across multiple formatting runs is translated
+        into separate English words/phrases (e.g. ``Example`` + ``For example``
+        → ``Example For example``).
         """
         w_r_els = para._p.findall(qn('w:r'))
 
@@ -270,6 +277,60 @@ class DocumentParser:
             new_t.set(qn('xml:space'), 'preserve')
             new_t.text = translated_runs[r_idx]
             r_elem.append(new_t)
+
+        # ── Normalise inter-run spacing & dedup ──────────────────────
+        # Walk runs left-to-right.  For each run with content, look back
+        # at the previous meaningful run (skipping whitespace-only runs)
+        # and: (a) dedup repeated boundary words, (b) fix missing spaces.
+        prev_text = None  # last meaningful run's text
+        prev_t_elem = None
+        for r_idx in range(min(len(w_r_els), len(translated_runs))):
+            t_curr = w_r_els[r_idx].find(qn('w:t'))
+            if t_curr is None:
+                continue
+            curr_text = t_curr.text or ''
+            if not curr_text.strip():
+                # Whitespace-only run — keep as candidate for spacing but
+                # don't use as prev_text for dedup purposes.
+                continue
+
+            if prev_text is not None and prev_t_elem is not None:
+                prev_words = prev_text.rstrip().split()
+                curr_words = curr_text.lstrip().split()
+
+                # -- Dedup: "University" + " University" → drop duplicate --
+                if prev_words and curr_words and (
+                    prev_words[-1].strip('.,;:!?').lower()
+                    == curr_words[0].strip('.,;:!?').lower()
+                ):
+                    curr_text = ' '.join(curr_words[1:])
+                    if curr_text:
+                        curr_text = ' ' + curr_text
+                    else:
+                        curr_text = ''
+                    t_curr.text = curr_text
+                    # Refresh curr_words after dedup
+                    curr_words = curr_text.lstrip().split()
+
+                # -- Spacing: merge fragments, add missing space --
+                # Add space when prev ends with alnum or punctuation and curr
+                # starts with a letter (e.g. "2010." + "D]." → "2010. D].").
+                need_space = (
+                    curr_text
+                    and prev_text[-1].isalnum() and curr_text[0].isalnum()
+                    and curr_text[0] not in ('-',)
+                ) or (
+                    curr_text
+                    and prev_text[-1] in ('.', ',', ':', ';', '!', '?', ')')
+                    and curr_text[0].isalpha()
+                )
+                if need_space:
+                    curr_text = ' ' + curr_text
+                    t_curr.text = curr_text
+
+            # Track this as the last meaningful run
+            prev_text = curr_text if curr_text else prev_text
+            prev_t_elem = t_curr
 
         # Force Times New Roman 12pt on runs that received text
         # (this modifies <w:rPr> in-place without removing other formatting)
@@ -448,6 +509,9 @@ class DocumentParser:
                     for attr in list(style_rFonts.attrib):
                         if 'theme' in attr.lower():
                             del style_rFonts.attrib[attr]
+                    for tag in ('w:ascii', 'w:eastAsia', 'w:hAnsi', 'w:cs'):
+                        if not style_rFonts.get(qn(tag)):
+                            style_rFonts.set(qn(tag), 'Times New Roman')
 
     @staticmethod
     def verify_no_cn(doc_or_path) -> list[str]:

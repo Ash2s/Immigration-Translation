@@ -2,6 +2,7 @@
 
 import re
 import httpx
+from datetime import datetime
 from openai import OpenAI
 from app.config import settings
 
@@ -74,6 +75,22 @@ COMMON_TERMS = {
     '卡瑞': 'CARR',
 }
 
+# ---------------------------------------------------------------------------
+# Chinese date patterns — convert to English before translation so the model
+# never sees 年/月/日 as standalone words.
+# ---------------------------------------------------------------------------
+MONTH_NAMES = [
+    '', 'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December',
+]
+
+# Full date    2025年10月22日  →  October 22, 2025
+# Year+month   2025年10月     →  October 2025
+# Month+day    10月22日       →  October 22
+_CHINESE_FULL_DATE_RE = re.compile(r'(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日')
+_CHINESE_YEAR_MONTH_RE = re.compile(r'(\d{4})\s*年\s*(\d{1,2})\s*月(?!\s*\d)')
+_CHINESE_MONTH_DAY_RE = re.compile(r'(?<!\d)(\d{1,2})\s*月\s*(\d{1,2})\s*日')
+
 
 class TranslatorService:
     """
@@ -124,6 +141,10 @@ class TranslatorService:
         """
         if not text:
             return text
+
+        # Convert Chinese dates to English format before glossary replacement,
+        # so year/month/day are never treated as standalone translatable words.
+        text = self.convert_chinese_dates(text)
 
         # Merge with COMMON_TERMS fallback (user glossary takes priority)
         merged = dict(COMMON_TERMS)
@@ -205,6 +226,10 @@ class TranslatorService:
         client = self._make_client(api_key, base_url)
         active_model = model or self._model
 
+        # Convert Chinese dates to English format BEFORE sending to API,
+        # so the model never sees 年/月/日 as standalone words.
+        processed_text = self.convert_chinese_dates(text)
+
         combined = dict(COMMON_TERMS)
         combined.update(glossary)
         glossary_lines = "\n".join(
@@ -222,6 +247,13 @@ class TranslatorService:
                 "Preserve formatting markers such as (Seal), (Signature), [Image], [Barcode].\n"
                 "Convert Chinese numbered lists (一、二、三… / 第一、第二、第三… / 1、2、3… / (一)(二)…) "
                 "to English format (I. II. III. / 1. 2. 3. / (1) (2)…).\n"
+                "IMPORTANT — Date translation rules:\n"
+                "- Chinese dates like X年X月X日 must be translated as a whole into natural English date format.\n"
+                "  Example: 2025年10月22日 → October 22, 2025 (NOT \"2025 October 22\" or \"22 October 2025 Year\")\n"
+                "- 年/月/日 are date components, NOT standalone words. Never translate them as \"year/month/days\".\n"
+                "- Use the standard American English date format: Month Day, Year (e.g. March 15, 2024).\n"
+                "- If only year+month (X年X月), write as \"October 2025\".\n"
+                "- If only month+day (X月X日), write as \"October 22\".\n"
                 "Use Times New Roman style, formal tone, and double line spacing.\n"
                 "Output only the translated text, no explanations."
             )
@@ -231,7 +263,7 @@ class TranslatorService:
                 model=active_model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": text},
+                    {"role": "user", "content": processed_text},
                 ],
                 temperature=temperature if temperature is not None else 0.3,
             )
@@ -239,6 +271,118 @@ class TranslatorService:
             return translated.strip() if translated else text
         except Exception as e:
             return f"[Translation Error]: {text}"
+
+    # ------------------------------------------------------------------
+    # English polishing — post-translation quality pass
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _clean_mechanical_errors(text: str) -> str:
+        """Fix deterministic mechanical errors: duplicated chars/words,
+        missing spaces at word boundaries, punctuation, parentheses.
+
+        Applied to ALL translated text (both full-paragraph and per-run)
+        regardless of whether the polish step runs."""
+        if not text:
+            return text
+        # 3+ consecutive identical chars (clear typo: "missspelled"→"mispelled")
+        result = re.sub(r'(\w)\1{2,}', r'\1', text)
+        # Duplicated whole word: "the the" or "has gradually has gradually"
+        result = re.sub(r'\b(\w+)\s+\1\b', r'\1', result)
+        # lowercase→UPPERCASE word boundary: "regionRelatively" → "region Relatively"
+        result = re.sub(r'([a-z])([A-Z])', r'\1 \2', result)
+        # Punctuation without trailing space: "climate.trend" → "climate. trend"
+        result = re.sub(r'([.,;:!?])([A-Za-z])', r'\1 \2', result)
+        # Word before opening paren: "PMV(Predicted" → "PMV (Predicted"
+        result = re.sub(r'(\w)\(', r'\1 (', result)
+        # Closing paren before word: "system)such" → "system) such"
+        result = re.sub(r'\)(\w)', r') \1', result)
+        # Apostrophe-s merging: "Germany'sFraunhofer" → "Germany's Fraunhofer"
+        result = re.sub(r"([a-zA-Z])'s([A-Z])", r"\1's \2", result)
+        # Double spaces
+        result = re.sub(r' {2,}', ' ', result)
+        return result
+
+    def polish_text(
+        self,
+        text: str,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        model: str | None = None,
+    ) -> str:
+        """
+        Polish English *text* to read like natural, fluent academic English.
+
+        Applies a deterministic pre-clean pass for mechanical errors (duplicated
+        letters, repeated words, missing word-boundary spaces), then sends the
+        text through the API with a proofreading system prompt that focuses on
+        grammar, flow, word choice, and removal of translationese ("Chinglish").
+        A final post-clean pass catches any residual mechanical issues.
+
+        Parameters
+        ----------
+        text : str
+            English text to polish / proofread.
+        api_key, base_url, model : str | None
+            Custom API credentials.  If omitted, uses the server defaults.
+
+        Returns
+        -------
+        str
+            Polished English text.  On API failure, returns the pre-cleaned
+            *text*.
+        """
+        if not text or len(text) < 10:
+            return text
+
+        # ── Pre-clean mechanical errors ──
+        pre_cleaned = self._clean_mechanical_errors(text)
+
+        client = self._make_client(api_key, base_url)
+        active_model = model or self._model
+
+        system_prompt = (
+            "You are a professional English proofreader for academic and immigration documents. "
+            "Revise the following English text so it reads like natural, fluent, academic-level English "
+            "written by a native speaker.\n\n"
+            "CRITICAL — fix these specific issues:\n"
+            "- Typographical errors: duplicated letters (e.g. \"decdecision\"→\"decision\") "
+            "or truncated words (e.g. \"Massachu\"→\"Massachusetts\").\n"
+            "- Duplicate / repeated words (e.g. \"indoor indoor\"→\"indoor\").\n"
+            "- Run-together words with missing spaces (e.g. \"regionRelatively\"→\"region relatively\").\n"
+            "- Grammar errors: subject-verb agreement, missing articles, incorrect prepositions, "
+            "tense consistency.\n"
+            "- Chinglish / translationese: unnatural word order, calques from Chinese, "
+            "overly literal phrasing. Rewrite to sound like natural academic English.\n"
+            "- Improve sentence flow: split run-on sentences, merge short choppy ones, add "
+            "appropriate transitions.\n\n"
+            "RULES:\n"
+            "- Maintain a formal academic tone throughout.\n"
+            "- Preserve ALL [bracketed markers] like [Seal], [Image], [Barcode] exactly.\n"
+            "- Preserve all numbers, dates, proper nouns, and technical terms exactly.\n"
+            "- Do NOT change or remove any factual information — only improve how it is expressed.\n"
+            "- If the text contains truncated or clearly malformed words, use context to infer "
+            "and restore the correct word.\n"
+            "- Output ONLY the revised text, no explanations or commentary."
+        )
+
+        try:
+            response = client.chat.completions.create(
+                model=active_model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": pre_cleaned},
+                ],
+                temperature=0.2,
+            )
+            polished = response.choices[0].message.content
+            result = polished.strip() if polished else pre_cleaned
+        except Exception as e:
+            result = pre_cleaned
+
+        # ── Post-clean: catch anything the model missed ──
+        result = self._clean_mechanical_errors(result)
+        return result
 
     # ------------------------------------------------------------------
     # Quality-assurance helpers
@@ -449,4 +593,45 @@ class TranslatorService:
         for pattern, replacement in TranslatorService._build_cn_enum_pattern():
             result = pattern.sub(replacement, result)
 
+        return result
+
+    @staticmethod
+    def convert_chinese_dates(text: str) -> str:
+        """Convert Chinese date expressions to English format.
+
+        Handles three patterns:
+          - 2025年10月22日  →  October 22, 2025
+          - 2025年10月     →  October 2025  (standalone year+month)
+          - 10月22日       →  October 22    (standalone month+day)
+
+        Also handles a comma before 日 for edge cases like 2025年10月22日,
+        Parameters
+        ----------
+        text : str
+            Text possibly containing Chinese date expressions.
+
+        Returns
+        -------
+        str
+            Text with dates converted to English format.
+        """
+        def _full_date(m: re.Match) -> str:
+            y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            return f"{MONTH_NAMES[mo]} {d}, {y}"
+
+        def _year_month(m: re.Match) -> str:
+            y, mo = int(m.group(1)), int(m.group(2))
+            return f"{MONTH_NAMES[mo]} {y}"
+
+        def _month_day(m: re.Match) -> str:
+            mo, d = int(m.group(1)), int(m.group(2))
+            return f"{MONTH_NAMES[mo]} {d}"
+
+        result = _CHINESE_FULL_DATE_RE.sub(_full_date, text)
+        result = _CHINESE_YEAR_MONTH_RE.sub(_year_month, result)
+        result = _CHINESE_MONTH_DAY_RE.sub(_month_day, result)
+
+        # Also handle the translated string 年/月/日 as standalone words
+        # (catch what the model might produce even after conversion)
+        result = result.replace('年 ', ' ').replace('月 ', ' ').replace('日 ', ' ')
         return result
